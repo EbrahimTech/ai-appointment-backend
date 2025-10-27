@@ -1,0 +1,31 @@
+{
+  "clinics": [
+    {
+      "slug": "prime-dental",
+      "name": "Prime Dental",
+      "timezone": "Asia/Riyadh",
+      "phone_number": "+966500000000",
+      "whatsapp_number": "+966500000000",
+      "services": [
+        {
+          "code": "consult",
+          "name": "Initial Consultation",
+          "description": "30 minute dental exam",
+          "language": "en",
+          "duration_minutes": 30
+        },
+        {
+          "code": "consult_ar",
+          "name": "استشارة أولية",
+          "description": "فحص أسنان لمدة 30 دقيقة",
+          "language": "ar",
+          "duration_minutes": 30
+        }
+      ],
+      "service_hours": [
+        {"service_code": "consult", "weekday": 5, "start": "09:00", "end": "13:00"},
+        {"service_code": "consult", "weekday": 6, "start": "14:00", "end": "20:00"}
+      ]
+    }
+  ]
+}

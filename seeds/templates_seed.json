@@ -1,0 +1,56 @@
+{
+  "templates": [
+    {
+      "clinic_slug": "prime-dental",
+      "code": "whatsapp_welcome_en",
+      "language": "en",
+      "category": "whatsapp",
+      "subject": "",
+      "body": "Hi {{name}}, thanks for contacting Prime Dental!",
+      "variables": [
+        "name"
+      ],
+      "provider_template_id": "dental_welcome_en"
+    },
+    {
+      "clinic_slug": "prime-dental",
+      "code": "whatsapp_welcome_ar",
+      "language": "ar",
+      "category": "whatsapp",
+      "subject": "",
+      "body": "مرحباً {{name}}! شكراً لتواصلك مع عيادة برايم دينتال!",
+      "variables": [
+        "name"
+      ],
+      "provider_template_id": "dental_welcome_ar"
+    },
+    {
+      "category": "whatsapp",
+      "clinic_slug": "prime-dental",
+      "language": "en",
+      "is_active": true,
+      "subject": "",
+      "body": "Our assistant will follow up shortly with more details.",
+      "code": "session_clarify",
+      "variables": [
+        "name"
+      ],
+      "provider_template_id": "session_clarify_en",
+      "hsm_name": "session_clarify"
+    },
+    {
+      "category": "whatsapp",
+      "clinic_slug": "prime-dental",
+      "language": "ar",
+      "is_active": true,
+      "subject": "",
+      "body": "??????? ??? ?????? ?????? ???????? ??????.",
+      "code": "session_clarify_ar",
+      "variables": [
+        "name"
+      ],
+      "provider_template_id": "session_clarify_ar",
+      "hsm_name": "session_clarify"
+    }
+  ]
+}

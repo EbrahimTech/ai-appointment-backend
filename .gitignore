@@ -1,0 +1,44 @@
+﻿# Python / Django
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.log
+
+# Virtual environments
+bot_venv/
+.env
+.env.*
+
+# Database / cache
+*.sqlite3
+db.sqlite3
+*.db
+*.sqlite
+.pytest_cache/
+coverage/
+.coverage
+coverage.xml
+
+# Static/media outputs
+staticfiles/
+media/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Docker overrides
+docker-compose.override.yml
+
+# Node / frontend (if added later)
+node_modules/
+
+# Secrets
+*.key
+*.pem

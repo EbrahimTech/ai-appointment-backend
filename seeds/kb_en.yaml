@@ -1,0 +1,12 @@
+documents:
+  - title: "Root Canal FAQ"
+    language: "en"
+    source: "internal"
+    body: |
+      Root canal treatments typically take 60 minutes.
+      We recommend arriving 10 minutes early for paperwork.
+  - title: "Teeth Whitening"
+    language: "en"
+    source: "internal"
+    body: |
+      Whitening appointments last 45 minutes and require a prior exam.
