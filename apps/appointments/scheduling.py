@@ -25,7 +25,7 @@ def suggest_slots(clinic, *, service: ClinicService | None = None, count: int = 
     if not service:
         return []
 
-    tz = ZoneInfo(clinic.timezone or "UTC")
+    tz = ZoneInfo(clinic.tz or "UTC")
     now = timezone.now().astimezone(tz)
     search_end = now + timedelta(days=7)
 

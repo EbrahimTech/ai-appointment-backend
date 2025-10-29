@@ -25,6 +25,104 @@
       "provider_template_id": "dental_welcome_ar"
     },
     {
+      "clinic_slug": "prime-dental",
+      "code": "greet",
+      "language": "en",
+      "category": "whatsapp",
+      "subject": "",
+      "body": "Hi {{first_name}} 👋 How can I help?",
+      "variables": [
+        "first_name"
+      ],
+      "provider_template_id": "greet_en",
+      "hsm_name": "greet",
+      "metadata": {
+        "hsm_name": "greet"
+      }
+    },
+    {
+      "clinic_slug": "prime-dental",
+      "code": "greet",
+      "language": "ar",
+      "category": "whatsapp",
+      "subject": "",
+      "body": "مرحبًا {{first_name}} 👋 كيف يمكنني مساعدتك؟",
+      "variables": [
+        "first_name"
+      ],
+      "provider_template_id": "greet_ar",
+      "hsm_name": "greet",
+      "metadata": {
+        "hsm_name": "greet"
+      }
+    },
+    {
+      "clinic_slug": "prime-dental",
+      "code": "slot_offer",
+      "language": "en",
+      "category": "whatsapp",
+      "subject": "",
+      "body": "We have {{slot1}} or {{slot2}}. Which works?",
+      "variables": [
+        "slot1",
+        "slot2"
+      ],
+      "provider_template_id": "slot_offer_en",
+      "hsm_name": "slot_offer",
+      "metadata": {
+        "hsm_name": "slot_offer"
+      }
+    },
+    {
+      "clinic_slug": "prime-dental",
+      "code": "slot_offer",
+      "language": "ar",
+      "category": "whatsapp",
+      "subject": "",
+      "body": "متاح {{slot1}} أو {{slot2}}. أيهما أنسب؟",
+      "variables": [
+        "slot1",
+        "slot2"
+      ],
+      "provider_template_id": "slot_offer_ar",
+      "hsm_name": "slot_offer",
+      "metadata": {
+        "hsm_name": "slot_offer"
+      }
+    },
+    {
+      "clinic_slug": "prime-dental",
+      "code": "confirm_booking",
+      "language": "en",
+      "category": "whatsapp",
+      "subject": "",
+      "body": "Booked for {{dt}}. We'll remind you.",
+      "variables": [
+        "dt"
+      ],
+      "provider_template_id": "confirm_booking_en",
+      "hsm_name": "confirm_booking",
+      "metadata": {
+        "hsm_name": "confirm_booking"
+      }
+    },
+    {
+      "clinic_slug": "prime-dental",
+      "code": "confirm_booking",
+      "language": "ar",
+      "category": "whatsapp",
+      "subject": "",
+      "body": "تم الحجز يوم {{dt}}. سنذكّرك تلقائيًا.",
+      "variables": [
+        "dt"
+      ],
+      "provider_template_id": "confirm_booking_ar",
+      "hsm_name": "confirm_booking",
+      "metadata": {
+        "hsm_name": "confirm_booking"
+      }
+    },
+    {
       "category": "whatsapp",
       "clinic_slug": "prime-dental",
       "language": "en",
@@ -36,7 +134,10 @@
         "name"
       ],
       "provider_template_id": "session_clarify_en",
-      "hsm_name": "session_clarify"
+      "hsm_name": "session_clarify",
+      "metadata": {
+        "hsm_name": "session_clarify"
+      }
     },
     {
       "category": "whatsapp",
@@ -44,13 +145,16 @@
       "language": "ar",
       "is_active": true,
       "subject": "",
-      "body": "??????? ??? ?????? ?????? ???????? ??????.",
+      "body": "سيتواصل معك مساعدنا خلال لحظات مع مزيد من التفاصيل.",
       "code": "session_clarify_ar",
       "variables": [
         "name"
       ],
       "provider_template_id": "session_clarify_ar",
-      "hsm_name": "session_clarify"
+      "hsm_name": "session_clarify",
+      "metadata": {
+        "hsm_name": "session_clarify"
+      }
     }
   ]
 }

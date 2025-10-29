@@ -1,9 +1,9 @@
-"""Domain models for the templates module."""
+﻿"""Domain models for the templates module."""
 
-from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 from apps.clinics.models import Clinic, LanguageChoices
+from apps.common.fields import CompatArrayField
 from apps.common.models import SoftDeletableModel
 
 
@@ -31,7 +31,7 @@ class MessageTemplate(SoftDeletableModel):
     )
     subject = models.CharField(max_length=255, blank=True)
     body = models.TextField()
-    variables = ArrayField(
+    variables = CompatArrayField(
         models.CharField(max_length=64), default=list, blank=True, help_text="Template placeholders"
     )
     provider_template_id = models.CharField(max_length=255, blank=True)

@@ -1,17 +1,25 @@
-"""Celery tasks for reminders and outbox retries."""
+"""Celery tasks for reminders, outbox, and calendar sync retries."""
 
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from apps.appointments.models import Appointment, AppointmentStatus
+from apps.appointments.models import (
+    Appointment,
+    AppointmentStatus,
+    AppointmentSyncState,
+)
+from apps.calendars.models import GoogleCredential
+from apps.calendars.services import GoogleCalendarService, GoogleCalendarServiceError
 from apps.channels.models import MessageType, OutboxMessage, OutboxStatus
 from apps.channels.services import (
     enqueue_whatsapp_hsm,
@@ -20,8 +28,156 @@ from apps.channels.services import (
 )
 from apps.conversations.models import ConversationMessage
 
+logger = logging.getLogger(__name__)
+
 OUTBOX_BATCH_SIZE = int(getattr(settings, "OUTBOX_DISPATCH_BATCH_SIZE", 50))
 OUTBOX_BACKOFF_MAX_SECONDS = int(getattr(settings, "OUTBOX_BACKOFF_MAX_SECONDS", 300))
+
+GOOGLE_SYNC_MAX_ATTEMPTS = int(getattr(settings, "GOOGLE_SYNC_MAX_ATTEMPTS", 5))
+GOOGLE_SYNC_INITIAL_DELAY = int(getattr(settings, "GOOGLE_SYNC_INITIAL_DELAY", 60))
+GOOGLE_SYNC_MAX_DELAY = int(getattr(settings, "GOOGLE_SYNC_MAX_DELAY", 1800))
+GOOGLE_SYNC_CACHE_SECONDS = int(getattr(settings, "GOOGLE_SYNC_CACHE_SECONDS", 120))
+GOOGLE_SYNC_SWEEP_BATCH = int(getattr(settings, "GOOGLE_SYNC_SWEEP_BATCH", 25))
+
+
+def schedule_google_calendar_retry(appointment_id: int, countdown: int | None = None) -> bool:
+    """Idempotently queue a retry task for the given appointment."""
+    cache_key = f"appt-google-retry:{appointment_id}"
+    if not cache.add(cache_key, True, GOOGLE_SYNC_CACHE_SECONDS):
+        return False
+    delay_seconds = countdown if countdown is not None else GOOGLE_SYNC_INITIAL_DELAY
+    retry_google_calendar_sync.apply_async(
+        args=[appointment_id],
+        countdown=delay_seconds,
+        task_id=f"appt-google-sync-{appointment_id}-initial",
+    )
+    logger.info(
+        "google_sync.retry_scheduled",
+        extra={"appointment_id": appointment_id, "countdown": delay_seconds},
+    )
+    return True
+
+
+@shared_task(bind=True, max_retries=0)
+def retry_google_calendar_sync(self, appointment_id: int) -> str:
+    """Attempt to promote tentative appointments to confirmed Google events."""
+    appointment = (
+        Appointment.objects.select_related("clinic", "service", "patient", "calendar_event")
+        .filter(id=appointment_id)
+        .first()
+    )
+    cache.delete(f"appt-google-retry:{appointment_id}")
+    if appointment is None:
+        logger.warning("google_sync.missing", extra={"appointment_id": appointment_id})
+        return "missing"
+
+    if appointment.external_event_id and appointment.sync_state == AppointmentSyncState.OK:
+        return "already_synced"
+
+    if appointment.sync_state == AppointmentSyncState.FAILED and appointment.google_retry_count >= GOOGLE_SYNC_MAX_ATTEMPTS:
+        return "max_attempts"
+
+    credential: GoogleCredential | None = (
+        GoogleCredential.objects.filter(clinic=appointment.clinic).order_by("-updated_at").first()
+    )
+    if credential is None:
+        appointment.sync_state = AppointmentSyncState.FAILED
+        appointment.google_last_error = "missing_google_credential"
+        appointment.save(
+            update_fields=["sync_state", "google_last_error", "updated_at"]
+        )
+        logger.error(
+            "google_sync.no_credentials",
+            extra={"appointment_id": appointment.id, "clinic_id": appointment.clinic_id},
+        )
+        return "missing_credential"
+
+    service = GoogleCalendarService()
+    try:
+        event = service.create_event(appointment, credential)
+    except GoogleCalendarServiceError as exc:
+        appointment.google_retry_count += 1
+        appointment.google_last_error = str(exc)
+        appointment.sync_state = (
+            AppointmentSyncState.FAILED
+            if appointment.google_retry_count >= GOOGLE_SYNC_MAX_ATTEMPTS
+            else AppointmentSyncState.TENTATIVE
+        )
+        appointment.save(
+            update_fields=[
+                "sync_state",
+                "google_retry_count",
+                "google_last_error",
+                "updated_at",
+            ]
+        )
+        attempt = appointment.google_retry_count
+        if appointment.sync_state == AppointmentSyncState.FAILED:
+            logger.error(
+                "google_sync.failed",
+                extra={
+                    "appointment_id": appointment.id,
+                    "attempt": attempt,
+                    "error": str(exc),
+                },
+            )
+            return "failed"
+        countdown = min(
+            GOOGLE_SYNC_INITIAL_DELAY * (2 ** (attempt - 1)),
+            GOOGLE_SYNC_MAX_DELAY,
+        )
+        logger.warning(
+            "google_sync.retry_backoff",
+            extra={
+                "appointment_id": appointment.id,
+                "attempt": attempt,
+                "countdown": countdown,
+                "error": str(exc),
+            },
+        )
+        retry_google_calendar_sync.apply_async(
+            args=[appointment.id],
+            countdown=countdown,
+            task_id=f"appt-google-sync-{appointment.id}-retry-{attempt}",
+        )
+        return "rescheduled"
+
+    appointment.external_event_id = event.external_event_id
+    appointment.sync_state = AppointmentSyncState.OK
+    appointment.google_retry_count = 0
+    appointment.google_last_error = ""
+    appointment.save(
+        update_fields=[
+            "external_event_id",
+            "sync_state",
+            "google_retry_count",
+            "google_last_error",
+            "updated_at",
+        ]
+    )
+    logger.info(
+        "google_sync.synced",
+        extra={"appointment_id": appointment.id, "external_event_id": event.external_event_id},
+    )
+    return "synced"
+
+
+@shared_task
+def sweep_tentative_google_syncs() -> int:
+    """Periodic sweep to retry pending tentative appointments."""
+    pending = (
+        Appointment.objects.filter(
+            sync_state=AppointmentSyncState.TENTATIVE,
+            google_retry_count__lt=GOOGLE_SYNC_MAX_ATTEMPTS,
+            external_event_id__isnull=True,
+        )
+        .order_by("updated_at")[:GOOGLE_SYNC_SWEEP_BATCH]
+    )
+    scheduled = 0
+    for appointment in pending:
+        if schedule_google_calendar_retry(appointment.id):
+            scheduled += 1
+    return scheduled
 
 
 @shared_task

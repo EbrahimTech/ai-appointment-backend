@@ -2,14 +2,16 @@
 
 from datetime import datetime, time, timedelta
 
+from datetime import datetime, time, timedelta
+
 from django.contrib.postgres.constraints import ExclusionConstraint
-from django.contrib.postgres.fields import DateTimeRangeField
 from django.contrib.postgres.indexes import GistIndex
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
 from apps.clinics.models import Clinic, ClinicService
+from apps.common.fields import CompatDateTimeRangeField
 from apps.common.models import TimeStampedModel
 from apps.patients.models import Patient
 
@@ -23,6 +25,14 @@ class AppointmentStatus(models.TextChoices):
     COMPLETED = "completed", "Completed"
     CANCELLED = "cancelled", "Cancelled"
     RESCHEDULED = "rescheduled", "Rescheduled"
+
+
+class AppointmentSyncState(models.TextChoices):
+    """Synchronisation state for external calendar integration."""
+
+    OK = "ok", "OK"
+    TENTATIVE = "tentative", "Tentative"
+    FAILED = "failed", "Failed"
 
 
 class AppointmentQuerySet(models.QuerySet):
@@ -58,12 +68,19 @@ class Appointment(TimeStampedModel):
         blank=True,
         related_name="appointments",
     )
-    slot = DateTimeRangeField()
+    slot = CompatDateTimeRangeField()
     status = models.CharField(
         max_length=16,
         choices=AppointmentStatus.choices,
         default=AppointmentStatus.PENDING,
     )
+    sync_state = models.CharField(
+        max_length=16,
+        choices=AppointmentSyncState.choices,
+        default=AppointmentSyncState.OK,
+    )
+    google_retry_count = models.PositiveIntegerField(default=0)
+    google_last_error = models.TextField(blank=True)
     source = models.CharField(max_length=50, blank=True)
     notes = models.TextField(blank=True)
     external_event_id = models.CharField(
@@ -90,8 +107,27 @@ class Appointment(TimeStampedModel):
 
     @property
     def start_at(self):
-        return self.slot.lower
+        value = self._slot_edge(0)
+        if value and timezone.is_naive(value):
+            return timezone.make_aware(value)
+        return value
 
     @property
     def end_at(self):
-        return self.slot.upper
+        value = self._slot_edge(1)
+        if value and timezone.is_naive(value):
+            return timezone.make_aware(value)
+        return value
+
+    def _slot_edge(self, index: int):
+        slot = self.slot
+        if slot is None:
+            return None
+        if hasattr(slot, "lower") and hasattr(slot, "upper"):
+            return slot.lower if index == 0 else slot.upper
+        if isinstance(slot, (tuple, list)):
+            try:
+                return slot[index]
+            except IndexError:
+                return None
+        return None

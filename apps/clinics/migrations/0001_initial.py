@@ -20,10 +20,11 @@ class Migration(migrations.Migration):
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('name', models.CharField(max_length=255)),
                 ('slug', models.SlugField(unique=True)),
-                ('timezone', models.CharField(default='UTC', max_length=64)),
+                ('tz', models.CharField(default='UTC', max_length=64)),
                 ('phone_number', models.CharField(blank=True, max_length=32)),
                 ('whatsapp_number', models.CharField(blank=True, max_length=32)),
                 ('address', models.TextField(blank=True)),
+                ('default_lang', models.CharField(default='en', max_length=8)),
             ],
             options={
                 'ordering': ['name'],

@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 import yaml
+from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.clinics.models import Clinic, ClinicService, LanguageChoices, ServiceHours
+from apps.accounts.models import AuditLog, ClinicMembership, StaffAccount
 from apps.kb.models import KnowledgeChunk, KnowledgeDocument, KnowledgeIndex
 from apps.channels.models import HSMTemplate, HSMTemplateStatus
 from apps.templates.models import MessageTemplate, TemplateCategory
@@ -63,6 +65,7 @@ class Command(BaseCommand):
             clinics = self._seed_clinics(clinic_data.get("clinics", []))
             self._seed_templates(template_data.get("templates", []), clinics)
             self._seed_knowledge_base(kb_documents, clinics)
+            self._seed_auth(clinics)
 
         self.stdout.write(self.style.SUCCESS("Seed data imported successfully."))
 
@@ -86,7 +89,8 @@ class Command(BaseCommand):
                 slug=payload["slug"],
                 defaults={
                     "name": payload["name"],
-                    "timezone": payload.get("timezone", "UTC"),
+                    "tz": payload.get("tz") or payload.get("timezone", "UTC"),
+                    "default_lang": payload.get("default_lang", "en"),
                     "phone_number": payload.get("phone_number", ""),
                     "whatsapp_number": payload.get("whatsapp_number", ""),
                     "address": payload.get("address", ""),
@@ -158,6 +162,7 @@ class Command(BaseCommand):
                     "variables": payload.get("variables", []),
                     "provider_template_id": payload.get("provider_template_id", ""),
                     "is_active": payload.get("is_active", True),
+                    "metadata": payload.get("metadata", {}),
                 },
             )
 
@@ -221,4 +226,45 @@ class Command(BaseCommand):
                 language=document.language,
                 tags=document.metadata.get("tags", []),
             )
+
+    def _seed_auth(self, clinics: Dict[str, Clinic]) -> None:
+        clinic = clinics.get("demo-dental")
+        if not clinic:
+            clinic, _ = Clinic.objects.update_or_create(
+                slug="demo-dental",
+                defaults={
+                    "name": "Demo Dental",
+                    "tz": "Europe/Istanbul",
+                    "default_lang": "ar",
+                },
+            )
+
+        user, created = User.objects.get_or_create(
+            email="admin@example.com",
+            defaults={
+                "username": "admin@example.com",
+                "first_name": "Admin",
+                "last_name": "User",
+                "is_staff": True,
+                "is_superuser": False,
+            },
+        )
+        if created or not user.check_password("Admin!234"):
+            user.set_password("Admin!234")
+            user.save()
+
+        ClinicMembership.objects.update_or_create(
+            user=user,
+            clinic=clinic,
+            defaults={"role": ClinicMembership.Role.OWNER},
+        )
+        StaffAccount.objects.update_or_create(
+            user=user, defaults={"role": StaffAccount.Role.SUPERADMIN}
+        )
+        AuditLog.objects.get_or_create(
+            actor_user=user,
+            action="seed.superadmin.created",
+            scope=AuditLog.Scope.AUTH,
+            defaults={"meta": {"email": user.email}},
+        )
 

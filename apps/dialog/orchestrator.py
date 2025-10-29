@@ -63,7 +63,7 @@ class DialogOrchestrator:
             self.fsm.apply(conversation, "qualified", context={"message": body, "is_off_topic": False})
             slots = suggest_slots(conversation.clinic)
             if slots:
-                prompt = self._build_slot_prompt(slots, language, conversation.clinic.timezone)
+                prompt = self._build_slot_prompt(slots, language, conversation.clinic.tz)
                 session_state.context["slot_suggestions"] = [
                     {
                         "start": slot.start.isoformat(),

@@ -13,6 +13,30 @@ def create_btree_gist(apps, schema_editor):
     schema_editor.execute("CREATE EXTENSION IF NOT EXISTS btree_gist;")
 
 
+def add_double_booking_constraint(apps, schema_editor):
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    Appointment = apps.get_model("appointments", "Appointment")
+    constraint = django.contrib.postgres.constraints.ExclusionConstraint(
+        name="prevent_double_booking",
+        expressions=[("clinic", "="), ("slot", "&&")],
+        condition=models.Q(status="booked"),
+    )
+    schema_editor.add_constraint(Appointment, constraint)
+
+
+def remove_double_booking_constraint(apps, schema_editor):
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    Appointment = apps.get_model("appointments", "Appointment")
+    constraint = django.contrib.postgres.constraints.ExclusionConstraint(
+        name="prevent_double_booking",
+        expressions=[("clinic", "="), ("slot", "&&")],
+        condition=models.Q(status="booked"),
+    )
+    schema_editor.remove_constraint(Appointment, constraint)
+
+
 class Migration(migrations.Migration):
 
     initial = True
@@ -44,10 +68,7 @@ class Migration(migrations.Migration):
                 'indexes': [django.contrib.postgres.indexes.GistIndex(fields=['slot'], name='appointment_slot_89bf01_gist')],
             },
         ),
-        migrations.AddConstraint(
-            model_name='appointment',
-            constraint=django.contrib.postgres.constraints.ExclusionConstraint(condition=models.Q(status='booked'), expressions=[('clinic', '='), ('slot', '&&')], name='prevent_double_booking'),
-        ),
+        migrations.RunPython(add_double_booking_constraint, reverse_code=remove_double_booking_constraint),
         migrations.AddConstraint(
             model_name='appointment',
             constraint=models.UniqueConstraint(condition=models.Q(external_event_id__isnull=False), fields=('clinic', 'external_event_id'), name='unique_external_event_per_clinic'),

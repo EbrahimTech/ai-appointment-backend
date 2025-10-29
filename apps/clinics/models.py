@@ -29,10 +29,11 @@ class Clinic(TimeStampedModel):
 
     name = models.CharField(max_length=255)
     slug = models.SlugField(unique=True)
-    timezone = models.CharField(max_length=64, default="UTC")
+    tz = models.CharField(max_length=64, default="UTC")
     phone_number = models.CharField(max_length=32, blank=True)
     whatsapp_number = models.CharField(max_length=32, blank=True)
     address = models.TextField(blank=True)
+    default_lang = models.CharField(max_length=8, default="en")
 
     class Meta:
         ordering = ["name"]

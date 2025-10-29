@@ -1,0 +1,129 @@
+from django.urls import path
+
+from apps.accounts.api import LoginView, MeView
+from apps.accounts.views import (
+    ClinicAppointmentListView,
+    ClinicAppointmentCreateView,
+    ClinicAppointmentRescheduleView,
+    ClinicAppointmentCancelView,
+    ClinicConversationDetailView,
+    ClinicConversationListView,
+    ClinicDashboardView,
+    ClinicServiceAdminView,
+    ClinicHoursAdminView,
+    ClinicTemplateListView,
+    ClinicTemplatePreviewView,
+    ClinicKnowledgeUploadView,
+    ClinicKnowledgePublishView,
+    ClinicKnowledgePreviewView,
+    ClinicWhatsAppStatusView,
+    ClinicWhatsAppTestView,
+    ClinicGoogleCalendarStatusView,
+    ClinicGoogleOAuthStartView,
+    ClinicGoogleOAuthCallbackView,
+    HQMetricsSummaryView,
+    HQTenantListView,
+)
+
+urlpatterns = [
+    path("auth/login", LoginView.as_view(), name="auth-login"),
+    path("auth/me", MeView.as_view(), name="auth-me"),
+    path("clinic/<slug:slug>/dashboard", ClinicDashboardView.as_view(), name="clinic-dashboard"),
+    path(
+        "clinic/<slug:slug>/conversations",
+        ClinicConversationListView.as_view(),
+        name="clinic-conversations",
+    ),
+    path(
+        "clinic/<slug:slug>/channels/whatsapp",
+        ClinicWhatsAppStatusView.as_view(),
+        name="clinic-whatsapp-status",
+    ),
+    path(
+        "clinic/<slug:slug>/channels/whatsapp/test",
+        ClinicWhatsAppTestView.as_view(),
+        name="clinic-whatsapp-test",
+    ),
+    path(
+        "clinic/<slug:slug>/calendar/google",
+        ClinicGoogleCalendarStatusView.as_view(),
+        name="clinic-google-calendar-status",
+    ),
+    path(
+        "clinic/<slug:slug>/calendar/google/oauth/start",
+        ClinicGoogleOAuthStartView.as_view(),
+        name="clinic-google-calendar-oauth-start",
+    ),
+    path(
+        "clinic/<slug:slug>/calendar/google/oauth/callback",
+        ClinicGoogleOAuthCallbackView.as_view(),
+        name="clinic-google-calendar-oauth-callback",
+    ),
+    path(
+        "clinic/<slug:slug>/kb/upload",
+        ClinicKnowledgeUploadView.as_view(),
+        name="clinic-kb-upload",
+    ),
+    path(
+        "clinic/<slug:slug>/kb/publish",
+        ClinicKnowledgePublishView.as_view(),
+        name="clinic-kb-publish",
+    ),
+    path(
+        "clinic/<slug:slug>/kb/preview",
+        ClinicKnowledgePreviewView.as_view(),
+        name="clinic-kb-preview",
+    ),
+    path(
+        "clinic/<slug:slug>/conversations/<int:pk>",
+        ClinicConversationDetailView.as_view(),
+        name="clinic-conversation-detail",
+    ),
+    path(
+        "clinic/<slug:slug>/conversations/<int:pk>/reply",
+        ClinicConversationDetailView.as_view(),
+        name="clinic-conversation-reply",
+    ),
+    path(
+        "clinic/<slug:slug>/templates",
+        ClinicTemplateListView.as_view(),
+        name="clinic-template-list",
+    ),
+    path(
+        "clinic/<slug:slug>/templates/preview",
+        ClinicTemplatePreviewView.as_view(),
+        name="clinic-template-preview",
+    ),
+    path(
+        "clinic/<slug:slug>/services",
+        ClinicServiceAdminView.as_view(),
+        name="clinic-services-admin",
+    ),
+    path(
+        "clinic/<slug:slug>/hours",
+        ClinicHoursAdminView.as_view(),
+        name="clinic-hours-admin",
+    ),
+    path(
+        "clinic/<slug:slug>/appointments",
+        ClinicAppointmentListView.as_view(),
+        name="clinic-appointments",
+    ),
+    path(
+        "clinic/<slug:slug>/appointments/create",
+        ClinicAppointmentCreateView.as_view(),
+        name="clinic-appointments-create",
+    ),
+    path(
+        "clinic/<slug:slug>/appointments/reschedule",
+        ClinicAppointmentRescheduleView.as_view(),
+        name="clinic-appointments-reschedule",
+    ),
+    path(
+        "clinic/<slug:slug>/appointments/cancel",
+        ClinicAppointmentCancelView.as_view(),
+        name="clinic-appointments-cancel",
+    ),
+    path("hq/metrics/summary", HQMetricsSummaryView.as_view(), name="hq-metrics-summary"),
+    path("hq/tenants", HQTenantListView.as_view(), name="hq-tenants"),
+]

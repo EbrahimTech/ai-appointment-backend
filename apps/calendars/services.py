@@ -60,6 +60,9 @@ class GoogleCalendarService:
                 "expires_at": expires_at,
                 "calendar_id": settings.GOOGLE_CALENDAR_ID if hasattr(settings, "GOOGLE_CALENDAR_ID") else "primary",
                 "scopes": ["https://www.googleapis.com/auth/calendar"],
+                "last_error": "",
+                "last_error_at": None,
+                "last_free_busy_at": timezone.now(),
             },
         )
         return credential
@@ -74,6 +77,9 @@ class GoogleCalendarService:
             timeout=15,
         )
         if response.status_code >= 400:
+            credential.last_error = response.text
+            credential.last_error_at = timezone.now()
+            credential.save(update_fields=["last_error", "last_error_at", "updated_at"])
             raise GoogleCalendarServiceError(response.text)
         data = response.json()
         calendar_event, _ = CalendarEvent.objects.update_or_create(
@@ -85,6 +91,9 @@ class GoogleCalendarService:
                 "payload": data,
             },
         )
+        credential.last_error = ""
+        credential.last_error_at = None
+        credential.save(update_fields=["last_error", "last_error_at", "updated_at"])
         return calendar_event
 
     def cancel_event(self, calendar_event: CalendarEvent, credential: GoogleCredential) -> None:
@@ -95,9 +104,15 @@ class GoogleCalendarService:
             timeout=15,
         )
         if response.status_code >= 400 and response.status_code != 410:
+            credential.last_error = response.text
+            credential.last_error_at = timezone.now()
+            credential.save(update_fields=["last_error", "last_error_at", "updated_at"])
             raise GoogleCalendarServiceError(response.text)
         calendar_event.sync_status = "cancelled"
         calendar_event.save(update_fields=["sync_status", "updated_at"])
+        credential.last_error = ""
+        credential.last_error_at = None
+        credential.save(update_fields=["last_error", "last_error_at", "updated_at"])
 
     def get_free_busy(
         self,
@@ -114,7 +129,7 @@ class GoogleCalendarService:
         payload = {
             "timeMin": start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
             "timeMax": end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "timeZone": credential.clinic.timezone if hasattr(credential, "clinic") else "UTC",
+            "timeZone": credential.clinic.tz if hasattr(credential, "clinic") else "UTC",
             "items": [{"id": credential.calendar_id}],
         }
         response = requests.post(
@@ -124,6 +139,11 @@ class GoogleCalendarService:
             timeout=15,
         )
         if response.status_code >= 400:
+            raise GoogleCalendarServiceError(response.text)
+        if response.status_code >= 400:
+            credential.last_error = response.text
+            credential.last_error_at = timezone.now()
+            credential.save(update_fields=["last_error", "last_error_at", "updated_at"])
             raise GoogleCalendarServiceError(response.text)
         busy_data = response.json().get("calendars", {}).get(credential.calendar_id, {}).get("busy", [])
         windows: list[tuple[datetime, datetime]] = []
@@ -135,6 +155,10 @@ class GoogleCalendarService:
             start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00")).astimezone(timezone.utc)
             end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00")).astimezone(timezone.utc)
             windows.append((start_dt, end_dt))
+        credential.last_free_busy_at = timezone.now()
+        credential.last_error = ""
+        credential.last_error_at = None
+        credential.save(update_fields=["last_free_busy_at", "last_error", "last_error_at", "updated_at"])
         return windows
 
     def _appointment_to_payload(self, appointment: Appointment) -> Dict[str, Any]:
@@ -147,11 +171,11 @@ class GoogleCalendarService:
             "description": appointment.notes,
             "start": {
                 "dateTime": appointment.slot.lower.isoformat(),
-                "timeZone": appointment.clinic.timezone,
+                "timeZone": appointment.clinic.tz,
             },
             "end": {
                 "dateTime": appointment.slot.upper.isoformat(),
-                "timeZone": appointment.clinic.timezone,
+                "timeZone": appointment.clinic.tz,
             },
             "attendees": attendees,
         }

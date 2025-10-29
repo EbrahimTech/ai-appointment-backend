@@ -20,6 +20,9 @@ class GoogleCredential(TimeStampedModel):
     expires_at = models.DateTimeField()
     scopes = models.JSONField(default=list, blank=True)
     calendar_id = models.CharField(max_length=255, default="primary")
+    last_free_busy_at = models.DateTimeField(null=True, blank=True)
+    last_error_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
 
     class Meta:
         unique_together = ("clinic", "account_email")
