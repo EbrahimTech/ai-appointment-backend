@@ -1,0 +1,13 @@
+﻿*** Begin Patch
+*** Update File: tests/test_appointment_write.py
+@@
+-        assert body["ok"] is True
+-        appointment = body["data"]["appointment"]
+-        assert appointment["status"] == AppointmentStatus.BOOKED
+-        assert appointment["service_code"] == service.code
++        assert body["ok"] is True
++        appointment = body["data"]["appointment"]
++        assert appointment["status"] == AppointmentStatus.BOOKED
++        assert appointment["service_code"] == service.code
++        assert appointment["sync_state"] == AppointmentSyncState.OK
+*** End Patch

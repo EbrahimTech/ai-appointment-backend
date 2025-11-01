@@ -51,6 +51,26 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CELERY_SWEEP_TENTATIVE_SECONDS: ${CELERY_SWEEP_TENTATIVE_SECONDS:-600}
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
+
+  beat:
+    build: .
+    command: sh -c "celery -A backend beat -l info"
+    environment:
+      DJANGO_DEBUG: "true"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-ai_appointment}
+      POSTGRES_USER: ${POSTGRES_USER:-ai_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CELERY_SWEEP_TENTATIVE_SECONDS: ${CELERY_SWEEP_TENTATIVE_SECONDS:-600}
     volumes:
       - .:/app
     depends_on:

@@ -6,11 +6,14 @@ import hashlib
 import json
 import math
 import re
+import secrets
 from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import yaml
+from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Max, Q
 from django.db.models.query import Prefetch, QuerySet
@@ -20,7 +23,8 @@ from rest_framework.views import APIView
 from django.conf import settings
 
 from apps.accounts.decorators import require_clinic_role, require_hq_role
-from apps.accounts.models import AuditLog, ClinicMembership
+from apps.accounts.models import AuditLog, ClinicMembership, SupportSession
+from apps.accounts.support import hash_support_token
 from apps.appointments.models import Appointment, AppointmentStatus, AppointmentSyncState
 from apps.channels.models import (
     ChannelType,
@@ -348,17 +352,7 @@ class ClinicAppointmentListView(APIView):
 
         offset = (page - 1) * size
         paginated = records[offset : offset + size]
-        items = [
-            {
-                "id": appt.id,
-                "service_code": appt.service.code if appt.service else "",
-                "start_at": appt.start_at.isoformat() if appt.start_at else None,
-                "end_at": appt.end_at.isoformat() if appt.end_at else None,
-                "status": appt.status,
-                "external_event_id": appt.external_event_id,
-            }
-            for appt in paginated
-        ]
+        items = [_serialize_appointment(appt) for appt in paginated]
 
         data = {"items": items, "page": page, "size": size, "total": total}
         return ok_response(data)
@@ -475,7 +469,7 @@ class ClinicAppointmentCreateView(APIView):
 
         data = {"appointment": _serialize_appointment(appointment)}
         if warning:
-            data["error"] = warning
+            data["google_tentative"] = True
         return ok_response(data)
 
 
@@ -585,7 +579,7 @@ class ClinicAppointmentRescheduleView(APIView):
 
         data = {"appointment": _serialize_appointment(appointment)}
         if warning:
-            data["error"] = warning
+            data["google_tentative"] = True
         return ok_response(data)
 
 
@@ -645,9 +639,9 @@ class ClinicAppointmentCancelView(APIView):
             finally:
                 calendar_event.delete()
 
-        data: Dict[str, object] = {}
+        data: Dict[str, object] = {"appointment": _serialize_appointment(appointment)}
         if warning:
-            data["error"] = warning
+            data["google_tentative"] = True
         return ok_response(data)
 
 
@@ -838,83 +832,6 @@ class ClinicHoursAdminView(APIView):
         return self.get(request, slug)
 
 
-class ClinicTemplateAdminView(APIView):
-    """Manage clinic templates (enable/disable and variables)."""
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    @require_clinic_role(
-        allowed=[
-            ClinicMembership.Role.OWNER,
-            ClinicMembership.Role.ADMIN,
-            ClinicMembership.Role.STAFF,
-            ClinicMembership.Role.VIEWER,
-        ]
-    )
-    def get(self, request, slug: str):
-        clinic: Clinic = request.clinic
-        templates = clinic.message_templates.order_by("code", "language")
-        items = [
-            {
-                "code": template.code,
-                "language": template.language,
-                "body": template.body,
-                "variables": template.variables or [],
-                "is_active": template.is_active,
-                "hsm_name": (template.metadata or {}).get("hsm_name"),
-            }
-            for template in templates
-        ]
-        return ok_response({"items": items})
-
-    @require_clinic_role(
-        allowed=[
-            ClinicMembership.Role.OWNER,
-            ClinicMembership.Role.ADMIN,
-        ]
-    )
-    def put(self, request, slug: str):
-        clinic: Clinic = request.clinic
-        payload = request.data or {}
-        templates_payload = payload.get("templates")
-        if not isinstance(templates_payload, list):
-            return error_response("INVALID_PAYLOAD", status_code=400)
-
-        updated_templates: List[MessageTemplate] = []
-        with transaction.atomic():
-            for entry in templates_payload:
-                if not isinstance(entry, dict):
-                    return error_response("INVALID_PAYLOAD", status_code=400)
-                code = str(entry.get("code", "")).strip()
-                language = str(entry.get("language", clinic.default_lang)).strip() or clinic.default_lang
-                if not code:
-                    return error_response("INVALID_TEMPLATE", status_code=400)
-
-                template = (
-                    clinic.message_templates.filter(code=code, language=language).first()
-                )
-                if template is None:
-                    return error_response("INVALID_TEMPLATE", status_code=400)
-
-                is_active = bool(entry.get("is_active", template.is_active))
-                variables = entry.get("variables", template.variables or [])
-                if not isinstance(variables, list):
-                    return error_response("LINT_FAILED", status_code=400)
-                variables_list = [str(var).strip() for var in variables]
-
-                placeholders = _extract_placeholders(template.body)
-                unknown = [var for var in variables_list if var and var not in placeholders]
-                if unknown:
-                    return error_response("LINT_FAILED", status_code=400)
-
-                template.is_active = is_active
-                template.variables = variables_list
-                template.save(update_fields=["is_active", "variables", "updated_at"])
-                updated_templates.append(template)
-
-        return self.get(request, slug)
-
-
 class ClinicTemplateListView(APIView):
     """Expose WhatsApp templates per clinic/language."""
 
@@ -974,9 +891,59 @@ class ClinicTemplateListView(APIView):
                     "variables": template.variables or [],
                     "enabled": template.is_active,
                 }
-            )
+        )
 
         return ok_response({"items": items, "page": page, "size": size, "total": total})
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def put(self, request, slug: str):
+        clinic: Clinic = request.clinic
+        payload = request.data or {}
+        templates_payload = payload.get("templates")
+        if not isinstance(templates_payload, list):
+            return error_response("INVALID_PAYLOAD", status_code=400)
+
+        with transaction.atomic():
+            for entry in templates_payload:
+                if not isinstance(entry, dict):
+                    return error_response("INVALID_PAYLOAD", status_code=400)
+                code = str(entry.get("code") or entry.get("key") or "").strip()
+                language = (
+                    str(entry.get("language") or entry.get("lang") or clinic.default_lang).strip()
+                    or clinic.default_lang
+                )
+                if not code:
+                    return error_response("INVALID_TEMPLATE", status_code=400)
+
+                template = clinic.message_templates.filter(code=code, language=language).first()
+                if template is None:
+                    return error_response("INVALID_TEMPLATE", status_code=400)
+
+                enabled_value = entry.get("enabled")
+                if enabled_value is None:
+                    enabled_value = entry.get("is_active", template.is_active)
+                is_active = bool(enabled_value)
+
+                variables_value = entry.get("variables", template.variables or [])
+                if not isinstance(variables_value, list):
+                    return error_response("LINT_FAILED", status_code=400)
+                variables_list = [str(var).strip() for var in variables_value]
+
+                placeholders = _extract_placeholders(template.body)
+                unknown = [var for var in variables_list if var and var not in placeholders]
+                if unknown:
+                    return error_response("LINT_FAILED", status_code=400)
+
+                template.is_active = is_active
+                template.variables = variables_list
+                template.save(update_fields=["is_active", "variables", "updated_at"])
+
+        return self.get(request, slug)
 
     @require_clinic_role(
         allowed=[
@@ -1018,6 +985,161 @@ class ClinicTemplateListView(APIView):
                 template.save(update_fields=["is_active", "variables", "updated_at"])
 
         return self.get(request, slug)
+
+
+class ClinicUserListView(APIView):
+    """Manage clinic memberships (list + invite)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def get(self, request, slug: str):
+        clinic: Clinic = request.clinic
+        memberships = (
+            ClinicMembership.objects.filter(clinic=clinic)
+            .select_related("user")
+            .order_by("user__email")
+        )
+        items = [_serialize_membership(member) for member in memberships]
+        return ok_response({"items": items})
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def post(self, request, slug: str):
+        clinic: Clinic = request.clinic
+        payload = request.data or {}
+        email = str(payload.get("email", "")).strip().lower()
+        role = str(payload.get("role", "")).strip().upper()
+        if not email:
+            return error_response("INVALID_EMAIL", status_code=400)
+        if role not in ClinicMembership.Role.values:
+            return error_response("INVALID_ROLE", status_code=400)
+
+        with transaction.atomic():
+            user = User.objects.filter(email__iexact=email).first()
+            if user is None:
+                username = email or f"user-{timezone.now().timestamp()}"
+                user = User.objects.create(
+                    username=username,
+                    email=email,
+                    first_name=str(payload.get("first_name", "")).strip()[:30],
+                    last_name=str(payload.get("last_name", "")).strip()[:30],
+                    is_active=False,
+                )
+                user.set_unusable_password()
+                user.save(update_fields=["password"])
+
+            membership, created = ClinicMembership.objects.get_or_create(
+                clinic=clinic,
+                user=user,
+                defaults={"role": role},
+            )
+            invited = created
+            if created:
+                AuditLog.objects.create(
+                    actor_user=request.user,
+                    action="USER_INVITE",
+                    scope=AuditLog.Scope.CLINIC,
+                    clinic=clinic,
+                    meta={
+                        "target_user_id": user.id,
+                        "target_email": user.email,
+                        "role": role,
+                    },
+                )
+
+        data = {
+            "id": membership.id,
+            "email": membership.user.email,
+            "role": membership.role,
+            "invited": invited,
+        }
+        return ok_response(data)
+
+
+class ClinicUserDetailView(APIView):
+    """Update or remove clinic members."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def put(self, request, slug: str, membership_id: int):
+        clinic: Clinic = request.clinic
+        payload = request.data or {}
+        role = str(payload.get("role", "")).strip().upper()
+        if role not in ClinicMembership.Role.values:
+            return error_response("INVALID_ROLE", status_code=400)
+
+        membership = (
+            ClinicMembership.objects.filter(clinic=clinic, id=membership_id)
+            .select_related("user")
+            .first()
+        )
+        if membership is None:
+            return error_response("NOT_FOUND", status_code=404)
+
+        if membership.role != role:
+            membership.role = role
+            membership.save(update_fields=["role", "updated_at"])
+            AuditLog.objects.create(
+                actor_user=request.user,
+                action="USER_ROLE_UPDATE",
+                scope=AuditLog.Scope.CLINIC,
+                clinic=clinic,
+                meta={
+                    "target_user_id": membership.user_id,
+                    "target_email": membership.user.email,
+                    "role": role,
+                },
+            )
+
+        return ok_response({"id": membership.id, "email": membership.user.email, "role": membership.role})
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def delete(self, request, slug: str, membership_id: int):
+        clinic: Clinic = request.clinic
+        membership = (
+            ClinicMembership.objects.filter(clinic=clinic, id=membership_id)
+            .select_related("user")
+            .first()
+        )
+        if membership is None:
+            return error_response("NOT_FOUND", status_code=404)
+
+        user = membership.user
+        meta = {
+            "target_user_id": user.id if user else None,
+            "target_email": user.email if user else "",
+            "role": membership.role,
+        }
+        membership.delete()
+        AuditLog.objects.create(
+            actor_user=request.user,
+            action="USER_REMOVE",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta=meta,
+        )
+        return ok_response({})
 
 
 class ClinicTemplatePreviewView(APIView):
@@ -1127,6 +1249,90 @@ class ClinicGoogleOAuthCallbackView(APIView):
         except GoogleCalendarServiceError:
             return error_response("OAUTH_FAILED", status_code=502)
         return ok_response({})
+
+class HQSupportStartView(APIView):
+    """Start an HQ support impersonation session."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_hq_role()
+    def post(self, request):
+        payload = request.data or {}
+        clinic_id_raw = payload.get("clinic_id")
+        reason = str(payload.get("reason", "")).strip()
+        if not reason:
+            return error_response("INVALID_REASON", status_code=400)
+        try:
+            clinic_id = int(clinic_id_raw)
+        except (TypeError, ValueError):
+            return error_response("INVALID_CLINIC", status_code=400)
+
+        clinic = Clinic.objects.filter(id=clinic_id).first()
+        if clinic is None:
+            return error_response("INVALID_CLINIC", status_code=404)
+
+        ttl_minutes = int(getattr(settings, "SUPPORT_SESSION_MINUTES", 15))
+        expires_at = timezone.now() + timedelta(minutes=ttl_minutes)
+        token = secrets.token_urlsafe(32)
+        token_hash = hash_support_token(token)
+        SupportSession.objects.create(
+            token_hash=token_hash,
+            staff_user=request.user,
+            clinic=clinic,
+            reason=reason,
+            expires_at=expires_at,
+        )
+        AuditLog.objects.create(
+            actor_user=request.user,
+            action="SUPPORT_SESSION_START",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta={
+                "impersonation": True,
+                "clinic_slug": clinic.slug,
+                "expires_at": expires_at.isoformat(),
+                "reason": reason,
+            },
+        )
+        return ok_response({"support_token": token, "expires_at": expires_at.isoformat()})
+
+
+class HQSupportStopView(APIView):
+    """Stop an active HQ support impersonation session."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_hq_role()
+    def post(self, request):
+        payload = request.data or {}
+        token = str(payload.get("support_token", "")).strip()
+        if not token:
+            return error_response("INVALID_TOKEN", status_code=400)
+        token_hash = hash_support_token(token)
+        session = (
+            SupportSession.objects.select_related("clinic")
+            .filter(token_hash=token_hash, staff_user=request.user, active=True)
+            .first()
+        )
+        if session is None:
+            return error_response("INVALID_TOKEN", status_code=404)
+        session.active = False
+        session.ended_at = timezone.now()
+        session.save(update_fields=["active", "ended_at", "updated_at"])
+        AuditLog.objects.create(
+            actor_user=request.user,
+            action="SUPPORT_SESSION_STOP",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=session.clinic,
+            meta={
+                "impersonation": True,
+                "clinic_slug": session.clinic.slug,
+                "ended_at": session.ended_at.isoformat(),
+            },
+        )
+        return ok_response({})
+
+
 class HQMetricsSummaryView(APIView):
     """Global HQ metrics (read-only)."""
 
@@ -1278,6 +1484,7 @@ def _get_google_credential(clinic: Clinic) -> Optional[GoogleCredential]:
 
 
 def _serialize_appointment(appointment: Appointment) -> Dict[str, object]:
+    """Represent appointment with sync_state (ok|tentative|failed)."""
     return {
         "id": appointment.id,
         "service_code": appointment.service.code if appointment.service else "",
@@ -1285,6 +1492,7 @@ def _serialize_appointment(appointment: Appointment) -> Dict[str, object]:
         "end_at": appointment.end_at.isoformat() if appointment.end_at else None,
         "status": appointment.status,
         "external_event_id": appointment.external_event_id,
+        "sync_state": appointment.sync_state,
     }
 
 
@@ -1462,6 +1670,51 @@ def _google_calendar_status(clinic: Clinic) -> dict:
         "status": status,
         "last_auth_at": credential.updated_at.isoformat() if credential.updated_at else None,
         "last_error": credential.last_error or None,
+    }
+
+
+def _serialize_outbox(outbox: OutboxMessage) -> Dict[str, object]:
+    """Map OutboxMessage to delivery telemetry for portal polling."""
+    state_map = {
+        OutboxStatus.PENDING: "QUEUED",
+        OutboxStatus.SENDING: "QUEUED",
+        OutboxStatus.SENT: "SENT",
+        OutboxStatus.DELIVERED: "DELIVERED",
+        OutboxStatus.FAILED: "FAILED",
+        OutboxStatus.CANCELLED: "FAILED",
+    }
+    state = state_map.get(outbox.status, "QUEUED")
+    provider_message_id = outbox.payload.get("provider_message_id") if isinstance(outbox.payload, dict) else None
+    return {
+        "id": outbox.id,
+        "message_type": outbox.message_type,
+        "state": state,
+        "provider_message_id": provider_message_id,
+        "last_error": outbox.last_error or None,
+        "created_at": outbox.created_at.isoformat(),
+        "updated_at": outbox.updated_at.isoformat(),
+    }
+
+
+def _user_display_name(user: User | None) -> str:
+    if user is None:
+        return ""
+    parts = [user.first_name.strip() if user.first_name else "", user.last_name.strip() if user.last_name else ""]
+    name = " ".join(part for part in parts if part).strip()
+    if name:
+        return name
+    if user.email:
+        return user.email.split("@")[0]
+    return user.username or ""
+
+
+def _serialize_membership(membership: ClinicMembership) -> Dict[str, object]:
+    user = membership.user
+    return {
+        "id": membership.id,
+        "email": user.email if user else "",
+        "name": _user_display_name(user),
+        "role": membership.role,
     }
 
 
@@ -1845,6 +2098,25 @@ class ClinicWhatsAppTestView(APIView):
         if not to_number:
             return error_response("INVALID_PAYLOAD", status_code=400)
 
+        allowlist = getattr(settings, "WHATSAPP_TEST_ALLOWLIST", {})
+        allowed_numbers = allowlist.get(clinic.slug) or allowlist.get("*") or []
+        if to_number not in allowed_numbers:
+            return error_response("FORBIDDEN_SANDBOX_NUMBER", status_code=403)
+
+        limit = int(getattr(settings, "WHATSAPP_TEST_RPM", 3))
+        if limit > 0:
+            rate_key = f"whatsapp-test:{clinic.id}"
+            current = cache.get(rate_key)
+            if current is None:
+                cache.add(rate_key, 1, timeout=60)
+            else:
+                if current >= limit:
+                    return error_response("RATE_LIMIT", status_code=429)
+                try:
+                    cache.incr(rate_key)
+                except ValueError:
+                    cache.set(rate_key, 1, timeout=60)
+
         template = clinic.message_templates.filter(code=template_key).order_by("language").first()
         if template is None:
             return error_response("INVALID_TEMPLATE", status_code=400)
@@ -1879,9 +2151,43 @@ class ClinicWhatsAppTestView(APIView):
                 variables=variables,
                 idempotency_key=idempotency_key,
             )
-        outbox.metadata["sandbox_to"] = to_number
+        metadata = outbox.metadata or {}
+        metadata["sandbox_to"] = to_number
+        outbox.metadata = metadata
         outbox.save(update_fields=["metadata", "updated_at"])
+
+        AuditLog.objects.create(
+            actor_user=request.user if request.user.is_authenticated else None,
+            action="WHATSAPP_TEST_SEND",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta={"to": to_number, "template_key": template.code, "outbox_id": outbox.id},
+        )
         return ok_response({"outbox_id": outbox.id})
+
+
+class ClinicOutboxStatusView(APIView):
+    """Fetch WhatsApp outbox delivery state (queued/sent/delivered/failed)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+        ]
+    )
+    def get(self, request, slug: str, outbox_id: int):
+        clinic: Clinic = request.clinic
+        outbox = (
+            OutboxMessage.objects.filter(id=outbox_id, clinic=clinic)
+            .select_related("clinic")
+            .first()
+        )
+        if outbox is None:
+            return error_response("NOT_FOUND", status_code=404)
+        return ok_response({"outbox": _serialize_outbox(outbox)})
 
 
 

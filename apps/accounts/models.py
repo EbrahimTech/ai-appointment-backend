@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils import timezone
 
 from apps.clinics.models import Clinic
 from apps.common.models import TimeStampedModel
@@ -58,3 +59,21 @@ class AuditLog(TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class SupportSession(TimeStampedModel):
+    """Temporary HQ support impersonation sessions."""
+
+    token_hash = models.CharField(max_length=128, unique=True)
+    staff_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="support_sessions")
+    clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name="support_sessions")
+    reason = models.CharField(max_length=255)
+    expires_at = models.DateTimeField()
+    active = models.BooleanField(default=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def is_active(self) -> bool:
+        return self.active and self.expires_at >= timezone.now()

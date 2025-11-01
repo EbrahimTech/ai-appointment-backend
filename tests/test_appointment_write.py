@@ -125,6 +125,7 @@ def test_appointment_create_success(client, setup_clinic):
         appointment = body["data"]["appointment"]
         assert appointment["status"] == AppointmentStatus.BOOKED
         assert appointment["service_code"] == service.code
+        assert appointment["sync_state"] == AppointmentSyncState.OK
         assert calls["count"] == 0
     finally:
         appointment_views.schedule_google_calendar_retry = original_scheduler
@@ -244,6 +245,7 @@ def test_reschedule_updates_google(client, django_user_model, monkeypatch):
     assert reschedule_resp.status_code == 200
     data = reschedule_resp.json()["data"]["appointment"]
     assert data["external_event_id"].startswith("evt-")
+    assert data["sync_state"] == AppointmentSyncState.OK
     assert len(cancel_calls) == 1
     appointment = Appointment.objects.get(id=appointment_id)
     appointment.refresh_from_db()
@@ -305,6 +307,10 @@ def test_cancel_clears_external_event(client, django_user_model, monkeypatch):
         ip_token=8,
     )
     assert cancel_resp.status_code == 200
+    cancel_body = cancel_resp.json()
+    assert cancel_body["ok"] is True
+    cancel_payload = cancel_body["data"]["appointment"]
+    assert cancel_payload["sync_state"] == AppointmentSyncState.OK
     appointment = Appointment.objects.get(id=appointment_id)
     assert appointment.status == AppointmentStatus.CANCELLED
     assert appointment.external_event_id is None
@@ -357,8 +363,10 @@ def test_google_failure_returns_tentative(client, django_user_model, monkeypatch
     )
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["error"] == "GOOGLE_TENTATIVE"
-    appointment = Appointment.objects.get(id=data["appointment"]["id"])
+    assert data["google_tentative"] is True
+    appointment_payload = data["appointment"]
+    assert appointment_payload["sync_state"] == AppointmentSyncState.TENTATIVE
+    appointment = Appointment.objects.get(id=appointment_payload["id"])
     assert appointment.status == AppointmentStatus.BOOKED
     assert appointment.sync_state == AppointmentSyncState.TENTATIVE
     assert scheduler_calls["count"] == 1
