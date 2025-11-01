@@ -1,0 +1,325 @@
+"use client";
+
+import Link from "next/link";
+
+import { useMemo, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import copy from "copy-to-clipboard";
+import { z } from "zod";
+
+const tenantSchema = z.object({
+  name: z.string().min(2),
+  slug: z.string().min(2).regex(/^[a-z0-9-]+$/),
+  default_lang: z.enum(["en", "ar"]),
+  tz: z.string().min(2),
+  owner_email: z.string().email(),
+  owner_name: z.string().min(2),
+});
+
+type TenantInput = z.infer<typeof tenantSchema>;
+
+export default function HQTenantsPage() {
+  const queryClient = useQueryClient();
+  const [showModal, setShowModal] = useState(false);
+  const [formState, setFormState] = useState<TenantInput>({
+    name: "",
+    slug: "",
+    default_lang: "en",
+    tz: "UTC",
+    owner_email: "",
+    owner_name: "",
+  });
+  const [formErrors, setFormErrors] = useState<string | null>(null);
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const tenantsQuery = useQuery({
+    queryKey: ["hqTenants"],
+    queryFn: async () => {
+      const response = await fetch("/api/proxy/hq/tenants");
+      if (!response.ok) {
+        throw new Error("LOAD_FAILED");
+      }
+      return response.json();
+    },
+  });
+
+  const createTenant = useMutation({
+    mutationFn: async (input: TenantInput) => {
+      const response = await fetch("/api/proxy/hq/tenants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "CREATE_FAILED");
+      }
+      return payload.data;
+    },
+    onSuccess: (data) => {
+      setInviteToken(data.invite_token);
+      setSuccessMessage(`Tenant ${data.clinic.name} created successfully.`);
+      setShowModal(false);
+      setFormState({
+        name: "",
+        slug: "",
+        default_lang: "en",
+        tz: "UTC",
+        owner_email: "",
+        owner_name: "",
+      });
+      setFormErrors(null);
+      queryClient.invalidateQueries({ queryKey: ["hqTenants"] });
+    },
+    onError: (error: Error) => {
+      setFormErrors(error.message);
+    },
+  });
+
+  const tenants = useMemo(() => tenantsQuery.data?.data?.items ?? [], [tenantsQuery.data]);
+
+  function handleChange(event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
+    const { name, value } = event.target;
+    setFormState((prev) => ({ ...prev, [name]: value }));
+  }
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsed = tenantSchema.safeParse(formState);
+    if (!parsed.success) {
+      setFormErrors(parsed.error.issues[0]?.message ?? "Invalid form");
+      return;
+    }
+    createTenant.mutate(parsed.data);
+  }
+
+  function handleCopyToken() {
+    if (inviteToken) {
+      copy(inviteToken);
+      setSuccessMessage("Invite token copied to clipboard.");
+    }
+  }
+
+  if (tenantsQuery.isPending) {
+    return (
+      <main className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Loading tenants...</p>
+      </main>
+    );
+  }
+
+  if (tenantsQuery.isError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-red-600">Unable to load tenants.</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="space-y-6 px-6 py-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">HQ Tenants</h1>
+          <p className="text-sm text-muted-foreground">
+            Manage clinics, invite owners, and monitor operational health.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link href="/hq/metrics" className="rounded-md border px-3 py-2 text-sm">
+            Global metrics
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              setShowModal(true);
+              setInviteToken(null);
+              setSuccessMessage(null);
+            }}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+          >
+            New Tenant
+          </button>
+        </div>
+      </div>
+
+      {successMessage ? (
+        <div className="mt-4 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          {successMessage}
+          {inviteToken ? (
+            <div className="mt-2 flex items-center gap-2">
+              <code className="rounded bg-white px-2 py-1 text-xs text-slate-600">{inviteToken}</code>
+              <button
+                type="button"
+                onClick={handleCopyToken}
+                className="text-xs font-medium text-primary underline"
+              >
+                Copy
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="overflow-hidden rounded-lg border">
+        <table className="min-w-full divide-y divide-border">
+          <thead className="bg-secondary/40">
+            <tr>
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Slug</th>
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Name</th>
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Channels</th>
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Calendar</th>
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">TTFR p95 (ms)</th>
+              <th className="px-4 py-2 text-right text-xs font-medium uppercase text-muted-foreground">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border bg-white">
+            {tenants.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-4 text-sm text-muted-foreground">
+                  No tenants found.
+                </td>
+              </tr>
+            ) : (
+              tenants.map((item: any) => (
+                <tr key={item.clinic.slug} className="hover:bg-secondary/30">
+                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-foreground">{item.clinic.slug}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm">{item.clinic.name}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm">{item.channels_status}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm">{item.calendar_status}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm">{item.last_ttfr_p95_ms}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm">
+                    <Link href={`/hq/tenants/${item.clinic.slug}`} className="rounded border px-3 py-1 text-xs">
+                      View
+                    </Link>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {showModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Create Tenant</h2>
+              <button type="button" className="text-sm text-muted-foreground" onClick={() => setShowModal(false)}>
+                Close
+              </button>
+            </div>
+            <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium" htmlFor="name">
+                    Name
+                  </label>
+                  <input
+                    id="name"
+                    name="name"
+                    value={formState.name}
+                    onChange={handleChange}
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium" htmlFor="slug">
+                    Slug
+                  </label>
+                  <input
+                    id="slug"
+                    name="slug"
+                    value={formState.slug}
+                    onChange={handleChange}
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium" htmlFor="default_lang">
+                    Default language
+                  </label>
+                  <select
+                    id="default_lang"
+                    name="default_lang"
+                    value={formState.default_lang}
+                    onChange={handleChange}
+                    className="w-full rounded border px-3 py-2 text-sm"
+                  >
+                    <option value="en">English</option>
+                    <option value="ar">Arabic</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium" htmlFor="tz">
+                    Timezone
+                  </label>
+                  <input
+                    id="tz"
+                    name="tz"
+                    value={formState.tz}
+                    onChange={handleChange}
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    required
+                    placeholder="UTC"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium" htmlFor="owner_email">
+                    Owner email
+                  </label>
+                  <input
+                    id="owner_email"
+                    name="owner_email"
+                    type="email"
+                    value={formState.owner_email}
+                    onChange={handleChange}
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium" htmlFor="owner_name">
+                    Owner name
+                  </label>
+                  <input
+                    id="owner_name"
+                    name="owner_name"
+                    value={formState.owner_name}
+                    onChange={handleChange}
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
+              </div>
+              {formErrors ? <p className="text-sm text-red-600">{formErrors}</p> : null}
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-md px-4 py-2 text-sm text-muted-foreground"
+                  onClick={() => setShowModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                  disabled={createTenant.isPending}
+                >
+                  {createTenant.isPending ? "Creating..." : "Create"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </main>
+  );
+}

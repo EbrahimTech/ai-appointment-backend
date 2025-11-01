@@ -5,6 +5,7 @@ from __future__ import annotations
 from django.contrib.auth.models import User
 from django.db import models
 from django.utils import timezone
+from uuid import uuid4
 
 from apps.clinics.models import Clinic
 from apps.common.models import TimeStampedModel
@@ -77,3 +78,20 @@ class SupportSession(TimeStampedModel):
 
     def is_active(self) -> bool:
         return self.active and self.expires_at >= timezone.now()
+
+
+class Invitation(TimeStampedModel):
+    """Owner invitation issued by HQ (or clinic admins)."""
+
+    uid = models.UUIDField(default=uuid4, editable=False, unique=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="invitations")
+    clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name="invitations")
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("user", "clinic")
+        ordering = ["-created_at"]
+
+    def is_active(self) -> bool:
+        return self.accepted_at is None and self.expires_at >= timezone.now()

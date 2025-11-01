@@ -1,6 +1,6 @@
 from django.urls import path
 
-from apps.accounts.api import LoginView, MeView
+from apps.accounts.api import AcceptInviteView, LoginView, MeView
 from apps.accounts.views import (
     ClinicAppointmentCancelView,
     ClinicAppointmentCreateView,
@@ -33,6 +33,7 @@ from apps.accounts.views import (
 urlpatterns = [
     path("auth/login", LoginView.as_view(), name="auth-login"),
     path("auth/me", MeView.as_view(), name="auth-me"),
+    path("auth/accept-invite", AcceptInviteView.as_view(), name="auth-accept-invite"),
     path("clinic/<slug:slug>/dashboard", ClinicDashboardView.as_view(), name="clinic-dashboard"),
     path("clinic/<slug:slug>/conversations", ClinicConversationListView.as_view(), name="clinic-conversations"),
     path(
