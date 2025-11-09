@@ -24,14 +24,24 @@ class CompatArrayField(ArrayField):
         if value is None:
             return []
         return super().get_prep_value(value)
+    
+    # قبل:
+    # def get_db_prep_save(self, value, connection, prepared=False):
+    #     if connection.vendor == "postgresql":
+    #         return super().get_db_prep_save(value, connection, prepared=prepared)
+    #     if value is None:
+    #         return json.dumps([])
+    #     if not prepared:
+    #         value = self.get_prep_value(value)
+    #     return json.dumps(value)
 
-    def get_db_prep_save(self, value, connection, prepared=False):
+    # بعد:
+    def get_db_prep_save(self, value, connection):
         if connection.vendor == "postgresql":
-            return super().get_db_prep_save(value, connection, prepared=prepared)
+            return super().get_db_prep_save(value, connection)
         if value is None:
             return json.dumps([])
-        if not prepared:
-            value = self.get_prep_value(value)
+        value = self.get_prep_value(value)
         return json.dumps(value)
 
     def get_placeholder(self, value, compiler, connection):
@@ -69,13 +79,31 @@ class CompatDateTimeRangeField(DateTimeRangeField):
             return "text"
         return super().db_type(connection)
 
-    def get_db_prep_value(self, value, connection, prepared=False):
+    # قبل:
+    # def get_db_prep_value(self, value, connection, prepared=False):
+    #     if connection.vendor == "postgresql":
+    #         return super().get_db_prep_value(value, connection, prepared=prepared)
+    #     if value is None:
+    #         return None
+    #     if not prepared:
+    #         value = super().get_prep_value(value)
+    #     lower = getattr(value, "lower", None)
+    #     upper = getattr(value, "upper", None)
+    #     if lower is None and upper is None and isinstance(value, (tuple, list)):
+    #         lower, upper = value
+    #     payload = {
+    #         "lower": lower.isoformat() if lower else None,
+    #         "upper": upper.isoformat() if upper else None,
+    #     }
+    #     return json.dumps(payload)
+
+    # بعد:
+    def get_db_prep_value(self, value, connection):
         if connection.vendor == "postgresql":
-            return super().get_db_prep_value(value, connection, prepared=prepared)
+            return super().get_db_prep_value(value, connection)
         if value is None:
             return None
-        if not prepared:
-            value = super().get_prep_value(value)
+        value = super().get_prep_value(value)
         lower = getattr(value, "lower", None)
         upper = getattr(value, "upper", None)
         if lower is None and upper is None and isinstance(value, (tuple, list)):

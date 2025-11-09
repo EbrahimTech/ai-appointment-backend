@@ -1,6 +1,4 @@
-﻿version: "3.9"
-
-services:
+﻿services:
   db:
     image: ankane/pgvector:latest
     restart: unless-stopped
@@ -12,12 +10,22 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai_user} -d ${POSTGRES_DB:-ai_appointment}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
   web:
     build: .
@@ -36,8 +44,10 @@ services:
     volumes:
       - .:/app
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   worker:
     build: .
@@ -55,8 +65,10 @@ services:
     volumes:
       - .:/app
     depends_on:
-      - db
-      - redis
+      web:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
   beat:
     build: .
@@ -74,8 +86,8 @@ services:
     volumes:
       - .:/app
     depends_on:
-      - db
-      - redis
+      worker:
+        condition: service_started
 
 volumes:
   postgres-data:

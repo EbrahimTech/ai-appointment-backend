@@ -1,0 +1,7 @@
+{
+  "/api/session/me/route": "app/api/session/me/route.js",
+  "/select-clinic/page": "app/select-clinic/page.js",
+  "/hq/page": "app/hq/page.js",
+  "/hq/metrics/page": "app/hq/metrics/page.js",
+  "/api/proxy/[...path]/route": "app/api/proxy/[...path]/route.js"
+}
