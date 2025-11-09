@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useSupportSession } from "../../../../providers";
+import { useSupportSession } from "../../../providers";
 
 type TenantItem = {
   clinic: {

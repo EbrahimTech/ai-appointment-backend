@@ -1,7 +1,9 @@
 {
-  "/api/session/me/route": "app/api/session/me/route.js",
-  "/select-clinic/page": "app/select-clinic/page.js",
+  "/not-found": "app/not-found.js",
   "/hq/page": "app/hq/page.js",
-  "/hq/metrics/page": "app/hq/metrics/page.js",
-  "/api/proxy/[...path]/route": "app/api/proxy/[...path]/route.js"
+  "/select-clinic/page": "app/select-clinic/page.js",
+  "/api/proxy/[...path]/route": "app/api/proxy/[...path]/route.js",
+  "/c/[slug]/services/page": "app/c/[slug]/services/page.js",
+  "/c/[slug]/dashboard/page": "app/c/[slug]/dashboard/page.js",
+  "/accept-invite/page": "app/accept-invite/page.js"
 }

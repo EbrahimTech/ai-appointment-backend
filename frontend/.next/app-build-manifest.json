@@ -6,20 +6,40 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
-    "/select-clinic/page": [
+    "/hq/tenants/[slug]/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/select-clinic/page.js"
+      "static/chunks/app/hq/tenants/[slug]/page.js"
     ],
     "/hq/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/hq/page.js"
     ],
-    "/hq/metrics/page": [
+    "/accept-invite/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/hq/metrics/page.js"
+      "static/chunks/app/accept-invite/page.js"
+    ],
+    "/select-clinic/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/select-clinic/page.js"
+    ],
+    "/c/[slug]/dashboard/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/c/[slug]/dashboard/page.js"
+    ],
+    "/c/[slug]/services/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/c/[slug]/services/page.js"
+    ],
+    "/not-found": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/not-found.js"
     ]
   }
 }

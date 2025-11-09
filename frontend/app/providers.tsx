@@ -4,6 +4,8 @@ import { createContext, useContext, useMemo, useState } from "react";
 import { NextIntlClientProvider, AbstractIntlMessages } from "next-intl";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+const defaultTimeZone = process.env.NEXT_PUBLIC_DEFAULT_TZ ?? "UTC";
+
 type SupportSession = {
   token: string;
   clinicSlug: string;
@@ -92,7 +94,11 @@ export default function Providers({ locale, messages, initialSupportSession, chi
   );
 
   return (
-    <NextIntlClientProvider locale={locale} messages={messages}>
+    <NextIntlClientProvider
+  locale={locale}
+  messages={messages}
+  timeZone={defaultTimeZone}
+>
       <QueryClientProvider client={queryClient}>
         <SupportSessionContext.Provider value={contextValue}>
           <SupportSessionBanner />
