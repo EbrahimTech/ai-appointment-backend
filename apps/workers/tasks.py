@@ -26,6 +26,7 @@ from apps.channels.services import (
     mark_outbox_delivered,
     mark_outbox_sent,
 )
+from apps.channels.whatsapp_service import get_whatsapp_service
 from apps.conversations.models import ConversationMessage
 
 logger = logging.getLogger(__name__)
@@ -210,21 +211,70 @@ def dispatch_outbox_messages() -> int:
             message.save(update_fields=["status", "attempts", "metadata", "updated_at"])
             dispatched.append(message)
 
+    # Get WhatsApp service
+    whatsapp_service = get_whatsapp_service()
+    
     for message in dispatched:
         try:
-            mark_outbox_sent(message, provider_message_id=f"simulated-{message.id}")
-            mark_outbox_delivered(message)
-        except Exception as exc:  # pragma: no cover - network/provider stub
-            message.status = (
-                OutboxStatus.FAILED
-                if message.attempts < message.max_attempts
-                else OutboxStatus.CANCELLED
-            )
-            backoff_seconds = min(OUTBOX_BACKOFF_MAX_SECONDS, 2 ** message.attempts)
+            # Send message via WhatsApp service
+            result = whatsapp_service.send_message(message)
+            
+            if result.success:
+                # Mark as sent
+                mark_outbox_sent(message, provider_message_id=result.provider_message_id or f"msg-{message.id}")
+                
+                # For now, mark as delivered immediately
+                # In production, delivery status should come from webhook
+                mark_outbox_delivered(message)
+            else:
+                # Handle failure
+                raise Exception(result.error or "Unknown WhatsApp send error")
+                
+        except Exception as exc:
+            # Determine if we should retry
+            should_retry = message.attempts < message.max_attempts
+            
+            # Check if error is retryable
+            error_str = str(exc).lower()
+            is_retryable = any(keyword in error_str for keyword in [
+                "timeout",
+                "connection",
+                "network",
+                "temporary",
+                "rate limit",
+                "429",
+                "503",
+                "502",
+            ])
+            
+            if should_retry and is_retryable:
+                message.status = OutboxStatus.FAILED
+                backoff_seconds = min(OUTBOX_BACKOFF_MAX_SECONDS, 2 ** message.attempts)
+                message.scheduled_for = timezone.now() + timedelta(seconds=backoff_seconds)
+            else:
+                # Permanent failure or max attempts reached
+                message.status = (
+                    OutboxStatus.FAILED
+                    if should_retry
+                    else OutboxStatus.CANCELLED
+                )
+                backoff_seconds = min(OUTBOX_BACKOFF_MAX_SECONDS, 2 ** message.attempts)
+                message.scheduled_for = timezone.now() + timedelta(seconds=backoff_seconds)
+            
             message.last_error = str(exc)
-            message.scheduled_for = timezone.now() + timedelta(seconds=backoff_seconds)
             message.save(
                 update_fields=["status", "last_error", "scheduled_for", "updated_at"]
+            )
+            
+            logger.error(
+                "Failed to send WhatsApp message",
+                extra={
+                    "outbox_id": message.id,
+                    "clinic_id": message.clinic_id,
+                    "attempt": message.attempts,
+                    "error": str(exc),
+                    "will_retry": should_retry and is_retryable,
+                },
             )
 
     return len(dispatched)
