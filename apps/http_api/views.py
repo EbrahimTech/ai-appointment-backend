@@ -3,6 +3,8 @@
 from datetime import timedelta
 from statistics import mean
 
+from django.core.cache import cache
+from django.db import connection
 from django.http import JsonResponse
 from django.utils import timezone
 
@@ -96,3 +98,43 @@ def _delivery_fail_rate(days: int) -> float:
         return 0.0
     failed = messages.filter(status=OutboxStatus.FAILED).count()
     return failed / total
+
+
+def health_check(request):
+    """Simple health check endpoint for load balancers and monitoring."""
+    return JsonResponse({"status": "ok", "service": "ai-appointment-backend"})
+
+
+def readiness_check(request):
+    """Readiness check - verifies database and cache connectivity."""
+    checks = {
+        "database": False,
+        "cache": False,
+    }
+    
+    # Check database
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            checks["database"] = True
+    except Exception:
+        pass
+    
+    # Check cache (Redis)
+    try:
+        cache.set("health_check", "ok", 10)
+        cache.get("health_check")
+        checks["cache"] = True
+    except Exception:
+        pass
+    
+    all_healthy = all(checks.values())
+    status_code = 200 if all_healthy else 503
+    
+    return JsonResponse(
+        {
+            "status": "ready" if all_healthy else "not_ready",
+            "checks": checks,
+        },
+        status=status_code,
+    )

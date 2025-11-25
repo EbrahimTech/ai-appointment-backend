@@ -4,9 +4,11 @@ from apps.appointments.views import appointments_today
 from apps.calendars.views import google_oauth_callback, google_oauth_start
 from apps.channels.views import whatsapp_delivery_receipt, whatsapp_webhook
 from apps.webhooks.views import lead_webhook
-from apps.http_api.views import metrics_summary
+from apps.http_api.views import health_check, metrics_summary, readiness_check
 
 urlpatterns = [
+    path('health/', health_check, name='health-check'),
+    path('ready/', readiness_check, name='readiness-check'),
     path('webhooks/lead', lead_webhook, name='lead-webhook'),
     path('channels/whatsapp/webhook', whatsapp_webhook, name='whatsapp-webhook'),
     path('channels/whatsapp/delivery', whatsapp_delivery_receipt, name='whatsapp-delivery'),
