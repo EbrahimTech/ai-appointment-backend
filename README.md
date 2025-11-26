@@ -67,3 +67,7 @@ pytest
 ## Environment
 
 Copy `.env.example` to `.env` and adjust DeepSeek, Google OAuth, WhatsApp provider, encryption key, and other secrets.
+
+## Testing Guide
+
+See `TESTING_GUIDE.md` for complete instructions on running the full stack for testing.

@@ -113,9 +113,9 @@ export default function ClinicDashboardPage() {
 
 function Card({ title, value }: { title: string; value: number | string | JSX.Element }) {
   return (
-    <div className="rounded-lg border bg-white p-4 shadow-sm">
-      <p className="text-sm text-muted-foreground">{title}</p>
-      <div className="mt-2 text-2xl font-semibold">{value}</div>
+    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow">
+      <p className="text-sm font-medium text-gray-600 mb-2">{title}</p>
+      <div className="text-2xl font-bold text-gray-900">{value}</div>
     </div>
   );
 }

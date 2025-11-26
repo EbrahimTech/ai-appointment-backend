@@ -232,21 +232,21 @@ export default function AppointmentsPage() {
 
   if (appointmentsQuery.isPending) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading appointments...</p>
-      </main>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-gray-500">Loading appointments...</p>
+      </div>
     );
   }
 
   if (appointmentsQuery.isError || !appointmentsQuery.data) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-4 text-center">
+      <div className="flex min-h-screen items-center justify-center px-4 text-center">
         <div className="space-y-3">
           <p className="text-sm text-red-600">Unable to load appointments.</p>
           <button
             type="button"
             onClick={() => appointmentsQuery.refetch()}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
             Retry
           </button>
@@ -258,20 +258,20 @@ export default function AppointmentsPage() {
   const pagination = appointmentsQuery.data;
 
   return (
-    <main className="space-y-8 px-6 py-8">
-      <header className="flex items-center justify-between">
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Appointments</h1>
-          <p className="text-sm text-muted-foreground">Manage bookings and monitor calendar sync.</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Appointments</h1>
+          <p className="text-sm text-gray-500 mt-1">Manage bookings and monitor calendar sync</p>
         </div>
         <button
           type="button"
           onClick={() => appointmentsQuery.refetch()}
-          className="rounded-md border px-3 py-2 text-sm"
+          className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
         >
           Refresh
         </button>
-      </header>
+      </div>
       {readOnly ? (
         <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           You are impersonating a clinic. Appointment changes are disabled until the support session ends.
@@ -439,7 +439,7 @@ export default function AppointmentsPage() {
           onChange={changePage}
         />
       ) : null}
-    </main>
+    </div>
   );
 }
 

@@ -84,15 +84,15 @@ export default function ClinicConversationsPage() {
 
   if (conversationsQuery.isPending) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading conversations...</p>
-      </main>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-gray-500">Loading conversations...</p>
+      </div>
     );
   }
 
   if (conversationsQuery.isError || !data) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-4 text-center">
+      <div className="flex min-h-screen items-center justify-center px-4 text-center">
         <div className="space-y-3">
           <p className="text-sm text-red-600">Unable to load conversations.</p>
           <button
@@ -108,8 +108,11 @@ export default function ClinicConversationsPage() {
   }
 
   return (
-    <main className="px-6 py-8">
-      <h1 className="text-2xl font-semibold">Conversations</h1>
+    <div className="p-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold text-gray-900">Conversations</h1>
+        <p className="text-sm text-gray-500 mt-1">Manage patient conversations</p>
+      </div>
       <section className="mt-6 rounded-lg border bg-white p-4 shadow-sm">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="space-y-1">
@@ -258,7 +261,7 @@ export default function ClinicConversationsPage() {
           onChange={handlePagination}
         />
       ) : null}
-    </main>
+    </div>
   );
 }
 

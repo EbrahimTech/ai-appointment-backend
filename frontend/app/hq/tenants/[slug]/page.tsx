@@ -120,27 +120,35 @@ export default function TenantDetailPage() {
     },
   });
 
-  if (tenantsQuery.isPending || tenantsQuery.isError) {
+  if (tenantsQuery.isPending) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading tenant details...</p>
-      </main>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-gray-500">Loading tenant details...</p>
+      </div>
+    );
+  }
+
+  if (tenantsQuery.isError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4 text-center">
+        <p className="text-sm text-red-600">Unable to load tenant details.</p>
+      </div>
     );
   }
 
   const tenant = tenantsQuery.data.find((item) => item.clinic.slug === slug);
   if (!tenant) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-4 text-center">
+      <div className="flex min-h-screen items-center justify-center px-4 text-center">
         <p className="text-sm text-red-600">Tenant not found.</p>
-      </main>
+      </div>
     );
   }
 
   const isImpersonating = support?.clinicSlug === slug;
 
   return (
-    <main className="space-y-8 px-6 py-8">
+    <div className="p-6 space-y-6">
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">{tenant.clinic.name}</h1>
@@ -179,8 +187,9 @@ export default function TenantDetailPage() {
       {feedback ? <Alert variant="success" message={feedback} /> : null}
       {error ? <Alert variant="error" message={error} /> : null}
 
-      <section className="space-y-4 rounded-lg border bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold">Channels</h2>
+      <div className="grid gap-6 md:grid-cols-2">
+        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">WhatsApp Channel</h2>
         {whatsappQuery.isPending ? (
           <p className="text-sm text-muted-foreground">Loading WhatsApp status...</p>
         ) : whatsappQuery.isError ? (
@@ -196,10 +205,10 @@ export default function TenantDetailPage() {
             ]}
           />
         )}
-      </section>
+        </section>
 
-      <section className="space-y-4 rounded-lg border bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold">Google Calendar</h2>
+        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Google Calendar</h2>
         {googleQuery.isPending ? (
           <p className="text-sm text-muted-foreground">Loading Google status...</p>
         ) : googleQuery.isError ? (
@@ -214,17 +223,18 @@ export default function TenantDetailPage() {
             ]}
           />
         )}
-      </section>
-    </main>
+        </section>
+      </div>
+    </div>
   );
 }
 
 function Alert({ variant, message }: { variant: "success" | "error"; message: string }) {
   const styles =
     variant === "success"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      ? "border-green-200 bg-green-50 text-green-700"
       : "border-red-200 bg-red-50 text-red-700";
-  return <div className={`rounded border px-4 py-3 text-sm ${styles}`}>{message}</div>;
+  return <div className={`rounded-md border px-4 py-3 text-sm ${styles}`}>{message}</div>;
 }
 
 function StatusCard({
@@ -236,19 +246,27 @@ function StatusCard({
   status: string;
   details: { label: string; value: string }[];
 }) {
+  const statusColors: Record<string, string> = {
+    OK: "text-green-700 bg-green-50 border-green-200",
+    WARN: "text-yellow-700 bg-yellow-50 border-yellow-200",
+    DOWN: "text-red-700 bg-red-50 border-red-200",
+    DISCONNECTED: "text-gray-700 bg-gray-50 border-gray-200",
+  };
+  const statusColor = statusColors[status] || "text-gray-700 bg-gray-50 border-gray-200";
+
   return (
-    <div className="rounded border bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b px-4 py-3">
+    <div className="rounded-lg border bg-white">
+      <div className={`flex items-center justify-between border-b px-4 py-3 ${statusColor}`}>
         <div>
-          <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <p className="text-lg font-semibold">{status}</p>
+          <p className="text-sm font-medium">{title}</p>
+          <p className="text-lg font-bold mt-1">{status}</p>
         </div>
       </div>
       <dl className="grid gap-3 px-4 py-3 text-sm">
         {details.map((detail) => (
           <div key={detail.label} className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">{detail.label}</dt>
-            <dd className="text-right">{detail.value}</dd>
+            <dt className="text-gray-600 font-medium">{detail.label}</dt>
+            <dd className="text-right text-gray-900">{detail.value || "—"}</dd>
           </div>
         ))}
       </dl>

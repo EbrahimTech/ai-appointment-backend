@@ -103,32 +103,35 @@ export default function HQTenantsPage() {
 
   if (tenantsQuery.isPending) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading tenants...</p>
-      </main>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-gray-500">Loading tenants...</p>
+      </div>
     );
   }
 
   if (tenantsQuery.isError) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center">
         <p className="text-sm text-red-600">Unable to load tenants.</p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="space-y-6 px-6 py-8">
+    <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">HQ Tenants</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage clinics, invite owners, and monitor operational health.
+          <h1 className="text-2xl font-semibold text-gray-900">Tenants</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Manage clinics, invite owners, and monitor operational health
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/hq/metrics" className="rounded-md border px-3 py-2 text-sm">
-            Global metrics
+          <Link
+            href="/hq/metrics"
+            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Global Metrics
           </Link>
           <button
             type="button"
@@ -137,61 +140,97 @@ export default function HQTenantsPage() {
               setInviteToken(null);
               setSuccessMessage(null);
             }}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
           >
-            New Tenant
+            + New Tenant
           </button>
         </div>
       </div>
 
       {successMessage ? (
-        <div className="mt-4 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-          {successMessage}
-          {inviteToken ? (
-            <div className="mt-2 flex items-center gap-2">
-              <code className="rounded bg-white px-2 py-1 text-xs text-slate-600">{inviteToken}</code>
-              <button
-                type="button"
-                onClick={handleCopyToken}
-                className="text-xs font-medium text-primary underline"
-              >
-                Copy
-              </button>
-            </div>
-          ) : null}
+        <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          <div className="flex items-center justify-between">
+            <span>{successMessage}</span>
+            {inviteToken ? (
+              <div className="flex items-center gap-2">
+                <code className="rounded bg-white px-3 py-1.5 text-xs font-mono text-gray-800 border border-green-200">
+                  {inviteToken}
+                </code>
+                <button
+                  type="button"
+                  onClick={handleCopyToken}
+                  className="text-xs font-medium text-green-700 hover:text-green-800 underline"
+                >
+                  Copy Link
+                </button>
+              </div>
+            ) : null}
+          </div>
+          {inviteToken && (
+            <p className="mt-2 text-xs text-green-600">
+              Send this link to the clinic owner:{" "}
+              <span className="font-mono">
+                {typeof window !== "undefined" && `${window.location.origin}/accept-invite?token=${inviteToken}`}
+              </span>
+            </p>
+          )}
         </div>
       ) : null}
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="min-w-full divide-y divide-border">
-          <thead className="bg-secondary/40">
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Slug</th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Name</th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Channels</th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Calendar</th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">TTFR p95 (ms)</th>
-              <th className="px-4 py-2 text-right text-xs font-medium uppercase text-muted-foreground">Actions</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                Clinic
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                Channels
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                Calendar
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                Performance
+              </th>
+              <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-700">
+                Actions
+              </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border bg-white">
+          <tbody className="bg-white divide-y divide-gray-200">
             {tenants.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-4 text-sm text-muted-foreground">
-                  No tenants found.
+                <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
+                  No tenants found. Create your first tenant to get started.
                 </td>
               </tr>
             ) : (
               tenants.map((item: any) => (
-                <tr key={item.clinic.slug} className="hover:bg-secondary/30">
-                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-foreground">{item.clinic.slug}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm">{item.clinic.name}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm">{item.channels_status}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm">{item.calendar_status}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm">{item.last_ttfr_p95_ms}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm">
-                    <Link href={`/hq/tenants/${item.clinic.slug}`} className="rounded border px-3 py-1 text-xs">
-                      View
+                <tr key={item.clinic.slug} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">{item.clinic.name}</div>
+                      <div className="text-xs text-gray-500">{item.clinic.slug}</div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <StatusBadge status={item.channels_status} />
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <StatusBadge status={item.calendar_status} />
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {item.last_ttfr_p95_ms ? `${item.last_ttfr_p95_ms}ms` : "—"}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                    <Link
+                      href={`/hq/tenants/${item.clinic.slug}`}
+                      className="text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      View Details
                     </Link>
                   </td>
                 </tr>
@@ -202,12 +241,19 @@ export default function HQTenantsPage() {
       </div>
 
       {showModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Create Tenant</h2>
-              <button type="button" className="text-sm text-muted-foreground" onClick={() => setShowModal(false)}>
-                Close
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Create New Tenant</h2>
+                <p className="text-sm text-gray-500 mt-1">Add a new clinic to the system</p>
+              </div>
+              <button
+                type="button"
+                className="text-gray-400 hover:text-gray-600 p-1"
+                onClick={() => setShowModal(false)}
+              >
+                <X className="w-5 h-5" />
               </button>
             </div>
             <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
@@ -299,27 +345,46 @@ export default function HQTenantsPage() {
                   />
                 </div>
               </div>
-              {formErrors ? <p className="text-sm text-red-600">{formErrors}</p> : null}
-              <div className="flex items-center justify-end gap-2">
+              {formErrors ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {formErrors}
+                </div>
+              ) : null}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
                 <button
                   type="button"
-                  className="rounded-md px-4 py-2 text-sm text-muted-foreground"
+                  className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                   onClick={() => setShowModal(false)}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   disabled={createTenant.isPending}
                 >
-                  {createTenant.isPending ? "Creating..." : "Create"}
+                  {createTenant.isPending ? "Creating..." : "Create Tenant"}
                 </button>
               </div>
             </form>
           </div>
         </div>
       ) : null}
-    </main>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const statusColors: Record<string, string> = {
+    OK: "bg-green-100 text-green-800",
+    WARN: "bg-yellow-100 text-yellow-800",
+    DOWN: "bg-red-100 text-red-800",
+    DISCONNECTED: "bg-gray-100 text-gray-800",
+  };
+  const color = statusColors[status] || "bg-gray-100 text-gray-800";
+  return (
+    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${color}`}>
+      {status}
+    </span>
   );
 }

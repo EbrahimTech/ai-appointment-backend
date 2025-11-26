@@ -2299,5 +2299,52 @@ class ClinicOutboxStatusView(APIView):
         return ok_response({"outbox": _serialize_outbox(outbox)})
 
 
+class ClinicSetupStatusView(APIView):
+    """Return clinic setup completion status for onboarding checklist."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def get(self, request, slug: str):
+        clinic: Clinic = request.clinic
+        
+        # Check services
+        has_services = clinic.services.filter(is_active=True).exists()
+        
+        # Check service hours
+        has_hours = ServiceHours.objects.filter(service__clinic=clinic).exists()
+        
+        # Check WhatsApp channel
+        has_whatsapp = ChannelAccount.objects.filter(
+            clinic=clinic,
+            channel=ChannelType.WHATSAPP
+        ).exists()
+        
+        # Check Google Calendar
+        has_google = GoogleCredential.objects.filter(clinic=clinic).exists()
+        
+        # Check templates
+        has_templates = HSMTemplate.objects.filter(
+            clinic=clinic,
+            status=HSMTemplateStatus.APPROVED
+        ).exists()
+        
+        # Check users (at least 1 user besides owner)
+        has_users = ClinicMembership.objects.filter(clinic=clinic).count() > 1
+        
+        data = {
+            "has_services": has_services,
+            "has_hours": has_hours,
+            "has_whatsapp": has_whatsapp,
+            "has_google": has_google,
+            "has_templates": has_templates,
+            "has_users": has_users,
+        }
+        return ok_response(data)
 
 

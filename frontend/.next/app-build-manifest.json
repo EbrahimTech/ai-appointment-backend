@@ -6,45 +6,30 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
-    "/hq/tenants/[slug]/page": [
+    "/login/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/hq/tenants/[slug]/page.js"
+      "static/chunks/app/login/page.js"
     ],
     "/hq/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/hq/page.js"
     ],
-    "/accept-invite/page": [
+    "/hq/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/accept-invite/page.js"
+      "static/chunks/app/hq/layout.js"
     ],
-    "/select-clinic/page": [
+    "/hq/metrics/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/select-clinic/page.js"
+      "static/chunks/app/hq/metrics/page.js"
     ],
-    "/c/[slug]/dashboard/page": [
+    "/not-found": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/c/[slug]/dashboard/page.js"
-    ],
-    "/c/[slug]/services/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/c/[slug]/services/page.js"
-    ],
-    "/c/[slug]/hours/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/c/[slug]/hours/page.js"
-    ],
-    "/login/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/login/page.js"
+      "static/chunks/app/not-found.js"
     ]
   }
 }
