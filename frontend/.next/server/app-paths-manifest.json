@@ -1,8 +1,6 @@
 {
-  "/not-found": "app/not-found.js",
-  "/login/page": "app/login/page.js",
   "/api/proxy/[...path]/route": "app/api/proxy/[...path]/route.js",
-  "/api/session/login/route": "app/api/session/login/route.js",
-  "/hq/metrics/page": "app/hq/metrics/page.js",
-  "/hq/page": "app/hq/page.js"
+  "/login/page": "app/login/page.js",
+  "/hq/page": "app/hq/page.js",
+  "/hq/metrics/page": "app/hq/metrics/page.js"
 }

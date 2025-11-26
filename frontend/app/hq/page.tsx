@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import copy from "copy-to-clipboard";
 import { z } from "zod";
+import { X } from "lucide-react";
 
 const tenantSchema = z.object({
   name: z.string().min(2),
