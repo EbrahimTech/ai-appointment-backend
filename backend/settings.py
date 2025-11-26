@@ -246,6 +246,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.workers.tasks.sweep_tentative_google_syncs",
         "schedule": timedelta(seconds=CELERY_SWEEP_TENTATIVE_SECONDS),
     },
+    "enforce-message-retention": {
+        "task": "apps.workers.tasks.enforce_message_retention",
+        "schedule": timedelta(hours=24),  # Run daily
+    },
 }
 
 SUPPORT_SESSION_MINUTES = int(os.getenv("SUPPORT_SESSION_MINUTES", "15"))

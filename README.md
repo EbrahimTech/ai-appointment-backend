@@ -1,62 +1,83 @@
 # AI Appointment Backend
 
-Backend for AI-driven dental appointment scheduling. Modules cover clinics, patients, WhatsApp channels, dialog FSM, LLM guardrails (DeepSeek), Google Calendar integration, and Celery workers for reminders/outbox.
+Django backend for AI-driven dental appointment scheduling with WhatsApp integration, LLM guardrails (DeepSeek), and Google Calendar sync.
 
-## Backend Local Development
+## Tech Stack
+
+- **Backend:** Django 4.2, PostgreSQL (pgvector), Redis, Celery
+- **Frontend:** Next.js 14 (App Router), Tailwind, React Query
+- **Integrations:** WhatsApp (Meta/Twilio), Google Calendar, DeepSeek LLM
+
+## Quick Start
 
 ```bash
+cp env.example .env
 python -m venv bot_venv
-bot_venv\Scripts\activate
+source bot_venv/bin/activate
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py seed_data
 python manage.py runserver
 ```
 
-### Docker Compose
+## Development
 
 ```bash
+# Docker
 make dev-up
 make dev-down
-```
 
-### Celery Beat
-
-```bash
+# Celery Beat
 make beat-up
 make beat-down
+
+# Frontend
+cd frontend && npm install && npm run dev
 ```
 
-Set `CELERY_SWEEP_TENTATIVE_SECONDS` (defaults to 600 seconds) to control how frequently tentative Google appointments are retried.
-
-### WhatsApp Sandbox Test Send
-
-Whitelist sandbox numbers per clinic via `WHATSAPP_TEST_ALLOWLIST` (JSON map of clinic slugs to phone arrays, e.g. `{"demo-dental":["+15555550123"],"*":["+15555550999"]}`) and adjust rate limits with `WHATSAPP_TEST_RPM` (defaults to 3 sends per minute). Attempts outside the allowlist or limit are rejected and audited automatically.
-
-### HQ Support Sessions
-
-OPS and SUPERADMIN staff can impersonate a clinic temporarily:
+## Production
 
 ```bash
-curl -H "Authorization: Bearer <hq-jwt>" ^
-     -H "Content-Type: application/json" ^
-     -X POST https://api.example.com/hq/support/start ^
-     -d "{\"clinic_id\":42,\"reason\":\"Investigate escalation\"}"
+docker-compose -f docker-compose.prod.yml build
+docker-compose -f docker-compose.prod.yml up -d
 ```
 
-The response returns `support_token` (valid for `SUPPORT_SESSION_MINUTES`, default 15). Use it as a bearer token on read-only clinic endpoints or `POST /clinic/{slug}/conversations/{id}/reply` (templates only). Stop the session explicitly via `/hq/support/stop`. All support traffic is audited; write APIs outside template replies remain blocked during impersonation.
+## Environment Variables
 
-## Frontend (Next.js App Router)
+See `env.example` for all required variables. Critical:
+- `DJANGO_SECRET_KEY`
+- `POSTGRES_*`
+- `CELERY_BROKER_URL`
+- `DEEPSEEK_API_KEY`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- `LEAD_WEBHOOK_SECRET`
 
-The `frontend/` directory hosts the HQ + clinic portal built with Next.js (App Router), Tailwind, shadcn/ui, React Query, Zod, and next-intl.
+## WhatsApp Setup
 
-```bash
-cd frontend
-npm install
-npm run dev
+Create `ChannelAccount` in database:
+
+```python
+from apps.channels.models import ChannelAccount
+ChannelAccount.objects.create(
+    clinic=clinic,
+    channel="whatsapp",
+    provider_name="meta",  # or "twilio", "generic"
+    access_token="TOKEN",
+    metadata={"phone_number_id": "ID"}
+)
 ```
 
-Set `NEXT_PUBLIC_BACKEND_URL` (defaults to `http://localhost:8000`). Authentication flows through `/api/session/login`, storing JWTs in httpOnly cookies. After choosing a clinic at `/select-clinic`, the `clinicSlug` cookie is persisted and users are redirected to `/c/[slug]/dashboard`. Middleware protects `/hq` and `/c/[slug]`, ensuring valid cookies before granting access.
+## Health Checks
+
+- `/health/` - Basic health
+- `/ready/` - Readiness (DB + cache)
+
+## Scripts
+
+- `scripts/setup.sh` - Initial setup
+- `scripts/deploy.sh` - Deployment prep
+- `scripts/health_check.sh` - Health verification
+- `scripts/backup_db.sh` - Database backup
 
 ## Testing
 
@@ -64,6 +85,6 @@ Set `NEXT_PUBLIC_BACKEND_URL` (defaults to `http://localhost:8000`). Authenticat
 pytest
 ```
 
-## Environment
+## Documentation
 
-Copy `.env.example` to `.env` and adjust DeepSeek, Google OAuth, WhatsApp provider, encryption key, and other secrets.
+See `GUIDE.md` for complete deployment guide and detailed documentation.

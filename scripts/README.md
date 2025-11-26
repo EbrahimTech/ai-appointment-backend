@@ -1,87 +1,31 @@
-# Scripts Directory
+# Scripts
 
-هذا المجلد يحتوي على scripts مساعدة للنشر والصيانة.
+Helper scripts for deployment and maintenance.
 
-## الملفات المتوفرة
+## Available Scripts
 
-### 1. setup.sh
-**الوصف:** يساعد في إعداد المشروع للمرة الأولى
+- **setup.sh** - Initial project setup (creates .env, venv, installs deps)
+- **deploy.sh** - Production deployment preparation (builds images, runs migrations)
+- **health_check.sh** - System health verification (endpoints, DB, Redis)
+- **backup_db.sh** - PostgreSQL backup with compression and cleanup
 
-**الاستخدام:**
+## Usage
+
 ```bash
-chmod +x scripts/setup.sh
+chmod +x scripts/*.sh
 ./scripts/setup.sh
-```
-
-**ما يفعله:**
-- يتحقق من وجود .env وينشئه من env.example
-- ينشئ virtual environment
-- يثبت dependencies
-- يتحقق من المتغيرات المطلوبة
-- ينشئ logs directory
-
-### 2. deploy.sh
-**الوصف:** يستعد للنشر (بناء images، migrations، إلخ)
-
-**الاستخدام:**
-```bash
-chmod +x scripts/deploy.sh
 ./scripts/deploy.sh
-```
-
-**ما يفعله:**
-- يتحقق من .env
-- يتحقق من أن DEBUG=false
-- يبني Docker image
-- يشغل health checks
-- يشغل migrations
-- يجمع static files
-
-### 3. health_check.sh
-**الوصف:** يتحقق من صحة النظام
-
-**الاستخدام:**
-```bash
-chmod +x scripts/health_check.sh
-BACKEND_URL=http://localhost:8000 ./scripts/health_check.sh
-```
-
-**ما يفعله:**
-- يتحقق من /health/ endpoint
-- يتحقق من /ready/ endpoint
-- يتحقق من database connection
-- يتحقق من Redis connection
-
-### 4. backup_db.sh
-**الوصف:** ينشئ backup لقاعدة البيانات
-
-**الاستخدام:**
-```bash
-chmod +x scripts/backup_db.sh
+./scripts/health_check.sh
 ./scripts/backup_db.sh
 ```
 
-**ما يفعله:**
-- ينشئ backup للـ PostgreSQL database
-- يضغط الملف
-- يحذف backups القديمة (أكثر من 7 أيام)
-
-**ملاحظة:** يحتاج pg_dump أو Docker
-
-## على Windows
-
-إذا كنت على Windows، يمكنك:
-1. استخدام Git Bash لتشغيل هذه scripts
-2. أو استخدام Docker للـ deployment
-3. أو تحويل الأوامر يدوياً إلى PowerShell
-
-## إضافة إلى Cron (Linux/Mac)
+## Cron Jobs (Linux/Mac)
 
 ```bash
-# Health check كل 5 دقائق
+# Health check every 5 minutes
 */5 * * * * /path/to/scripts/health_check.sh >> /var/log/health_check.log 2>&1
 
-# Backup يومياً في 2 صباحاً
+# Daily backup at 2 AM
 0 2 * * * /path/to/scripts/backup_db.sh >> /var/log/backup.log 2>&1
 ```
 

@@ -42,3 +42,9 @@ node_modules/
 # Secrets
 *.key
 *.pem
+
+# Temporary files
+temp_*.txt
+temp*.patch
+tmp_*.txt
+*.diff
