@@ -103,7 +103,7 @@ export default function ClinicConversationsPage() {
             Retry
           </button>
         </div>
-      </main>
+      </div>
     );
   }
 

@@ -1,6 +1,8 @@
 {
+  "/select-clinic/page": "app/select-clinic/page.js",
   "/api/proxy/[...path]/route": "app/api/proxy/[...path]/route.js",
-  "/login/page": "app/login/page.js",
-  "/hq/page": "app/hq/page.js",
-  "/hq/metrics/page": "app/hq/metrics/page.js"
+  "/c/[slug]/onboarding/page": "app/c/[slug]/onboarding/page.js",
+  "/c/[slug]/dashboard/page": "app/c/[slug]/dashboard/page.js",
+  "/hq/tenants/[slug]/page": "app/hq/tenants/[slug]/page.js",
+  "/hq/page": "app/hq/page.js"
 }
