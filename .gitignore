@@ -36,8 +36,18 @@ Thumbs.db
 # Docker overrides
 docker-compose.override.yml
 
-# Node / frontend (if added later)
+# Node / frontend
 node_modules/
+frontend/.next/
+frontend/.next/**
+frontend/out/
+frontend/dist/
+frontend/build/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
 # Secrets
 *.key
