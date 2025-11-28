@@ -46,7 +46,7 @@ export default function TenantDetailPage() {
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || "Failed to load tenants");
       }
-      return (payload.data?.items ?? []) as TenantItem[];
+      return payload;
     },
   });
 
@@ -136,7 +136,7 @@ export default function TenantDetailPage() {
     );
   }
 
-  const tenants = tenantsQuery.data ?? [];
+  const tenants = useMemo(() => tenantsQuery.data?.data?.items ?? [], [tenantsQuery.data]);
   const tenant = tenants.find((item) => item.clinic.slug === slug);
   if (!tenant) {
     return (
