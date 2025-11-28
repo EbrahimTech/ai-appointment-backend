@@ -9,8 +9,15 @@ export function middleware(request: NextRequest) {
   }
 
   const accessToken = request.cookies.get("accessToken");
+  const hqRole = request.cookies.get("hqRole")?.value;
+  
   if (pathname.startsWith("/login")) {
     if (accessToken) {
+      // HQ staff should go directly to /hq
+      if (hqRole && (hqRole === "SUPERADMIN" || hqRole === "OPS")) {
+        return NextResponse.redirect(new URL("/hq", request.url));
+      }
+      // Regular users go to select-clinic
       return NextResponse.redirect(new URL("/select-clinic", request.url));
     }
     return NextResponse.next();
@@ -27,8 +34,7 @@ export function middleware(request: NextRequest) {
     if (!accessToken) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
-    const hqRole = request.cookies.get("hqRole")?.value;
-    if (!hqRole) {
+    if (!hqRole || (hqRole !== "SUPERADMIN" && hqRole !== "OPS")) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
     return NextResponse.next();
