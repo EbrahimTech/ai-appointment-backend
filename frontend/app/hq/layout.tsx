@@ -11,7 +11,6 @@ import {
   LogOut,
   Menu,
   X,
-  Home,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -103,14 +102,7 @@ export default function HQLayout({ children }: { children: ReactNode }) {
           </nav>
 
           {/* Footer */}
-          <div className="p-4 border-t border-gray-200 space-y-1">
-            <Link
-              href="/select-clinic"
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
-            >
-              <Home className="w-5 h-5 text-gray-500" />
-              <span>Switch to Clinic</span>
-            </Link>
+          <div className="p-4 border-t border-gray-200">
             <button
               onClick={handleLogout}
               className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
