@@ -136,7 +136,10 @@ export default function TenantDetailPage() {
     );
   }
 
-  const tenants = useMemo(() => tenantsQuery.data?.data?.items ?? [], [tenantsQuery.data]);
+  const tenants = useMemo(() => {
+    const items = tenantsQuery.data?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }, [tenantsQuery.data]);
   const tenant = tenants.find((item) => item.clinic.slug === slug);
   if (!tenant) {
     return (
