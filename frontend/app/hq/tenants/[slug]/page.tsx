@@ -120,6 +120,13 @@ export default function TenantDetailPage() {
     },
   });
 
+  // All hooks must be called before any early returns
+  const tenants = useMemo(() => {
+    const items = tenantsQuery.data?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }, [tenantsQuery.data]);
+  const tenant = tenants.find((item) => item.clinic.slug === slug);
+
   if (tenantsQuery.isPending) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -135,12 +142,6 @@ export default function TenantDetailPage() {
       </div>
     );
   }
-
-  const tenants = useMemo(() => {
-    const items = tenantsQuery.data?.data?.items;
-    return Array.isArray(items) ? items : [];
-  }, [tenantsQuery.data]);
-  const tenant = tenants.find((item) => item.clinic.slug === slug);
   if (!tenant) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4 text-center">
