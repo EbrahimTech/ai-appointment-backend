@@ -1273,7 +1273,7 @@ class HQSupportStartView(APIView):
         if clinic is None:
             return error_response("INVALID_CLINIC", status_code=404)
 
-        ttl_minutes = int(getattr(settings, "SUPPORT_SESSION_MINUTES", 15))
+        ttl_minutes = int(getattr(settings, "SUPPORT_SESSION_MINUTES", 60))
         expires_at = timezone.now() + timedelta(minutes=ttl_minutes)
         token = secrets.token_urlsafe(32)
         token_hash = hash_support_token(token)

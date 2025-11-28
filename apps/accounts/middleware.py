@@ -10,8 +10,9 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken
 
-from apps.accounts.models import AuditLog, ClinicMembership, SupportSession
+from apps.accounts.models import AuditLog, ClinicMembership, StaffAccount, SupportSession
 from apps.accounts.support import hash_support_token
+from apps.clinics.models import Clinic
 
 
 class ClinicScopeMiddleware:
@@ -48,6 +49,42 @@ class ClinicScopeMiddleware:
 
         user, _token = auth_result
         request.user = user
+
+        # Check for HQ staff override (SUPERADMIN or OPS can access any clinic)
+        staff = getattr(user, "staff_account", None)
+        if staff and staff.role in (StaffAccount.Role.SUPERADMIN, StaffAccount.Role.OPS):
+            clinic = Clinic.objects.filter(slug=slug).first()
+            if clinic is None:
+                return JsonResponse({"ok": False, "error": "CLINIC_NOT_FOUND"}, status=404)
+
+            # Create virtual membership for HQ staff
+            membership = ClinicMembership(
+                clinic=clinic,
+                user=user,
+                role=ClinicMembership.Role.ADMIN,
+            )
+            request.clinic_membership = membership
+            request.clinic = clinic
+            request.hq_override = True
+
+            # Audit log for HQ access
+            AuditLog.objects.create(
+                actor_user=user,
+                action="HQ_CLINIC_ACCESS",
+                scope=AuditLog.Scope.CLINIC,
+                clinic=clinic,
+                meta={
+                    "hq_override": True,
+                    "hq_role": staff.role,
+                    "clinic_slug": clinic.slug,
+                    "path": request.path,
+                    "method": request.method,
+                },
+            )
+
+            return self.get_response(request)
+
+        # Standard membership check
         membership = (
             ClinicMembership.objects.select_related("clinic")
             .filter(user=user, clinic__slug=slug)
@@ -109,15 +146,9 @@ class ClinicScopeMiddleware:
 
     @staticmethod
     def _support_allowed(request, slug: str) -> bool:
-        if request.method in {"GET", "HEAD", "OPTIONS"}:
-            return True
-        if (
-            request.method == "POST"
-            and request.path.startswith(f"/clinic/{slug}/conversations/")
-            and request.path.endswith("/reply")
-        ):
-            return True
-        return False
+        # Support sessions now have full admin access (no restrictions)
+        # All operations are logged in audit log
+        return True
 
     @staticmethod
     def _deactivate_session(session: SupportSession):

@@ -325,6 +325,41 @@ export default function TenantDetailPage() {
           </div>
         </div>
 
+        {/* Quick Access Section */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-100">
+              <Building2 className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Quick Access</h2>
+              <p className="text-sm text-gray-600">Enter clinic portal directly with full admin access</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              // Set clinicSlug cookie for HQ staff to allow access
+              try {
+                await fetch("/api/session/select-clinic", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ slug: tenant.clinic.slug }),
+                });
+                window.location.href = `/c/${tenant.clinic.slug}/dashboard`;
+              } catch (error) {
+                console.error("Failed to set clinic slug:", error);
+                // Still try to navigate - backend will handle authorization
+                window.location.href = `/c/${tenant.clinic.slug}/dashboard`;
+              }
+            }}
+            className="w-full flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm"
+          >
+            <Building2 className="w-4 h-4" />
+            <span>Enter Clinic Portal</span>
+          </button>
+        </div>
+
         {/* Support Session Section */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -333,14 +368,14 @@ export default function TenantDetailPage() {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Support Session</h2>
-              <p className="text-sm text-gray-600">Impersonate this clinic for support purposes</p>
+              <p className="text-sm text-gray-600">Impersonate this clinic for support purposes (logged session)</p>
             </div>
           </div>
           
           {isImpersonating ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mb-4">
               <p className="text-sm text-amber-900 mb-3">
-                <strong>Active session:</strong> You are currently impersonating this clinic. Read-only actions only (template replies allowed).
+                <strong>Active session:</strong> You are currently impersonating this clinic with full admin access. All actions are logged.
               </p>
               <button
                 type="button"

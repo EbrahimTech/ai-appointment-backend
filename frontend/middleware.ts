@@ -41,6 +41,16 @@ export function middleware(request: NextRequest) {
     }
     const slug = clinicMatch[1];
     const storedSlug = request.cookies.get("clinicSlug")?.value;
+    const hqRole = request.cookies.get("hqRole")?.value;
+    
+    // HQ staff (SUPERADMIN/OPS) can access any clinic directly without clinicSlug cookie
+    // The backend middleware will handle the authorization
+    if (hqRole && (hqRole === "SUPERADMIN" || hqRole === "OPS")) {
+      // Allow access - backend will verify HQ role
+      return NextResponse.next();
+    }
+    
+    // Regular users need clinicSlug cookie to match
     if (!storedSlug || storedSlug !== slug) {
       return NextResponse.redirect(new URL("/select-clinic", request.url));
     }
