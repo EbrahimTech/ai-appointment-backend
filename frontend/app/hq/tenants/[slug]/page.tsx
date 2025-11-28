@@ -124,10 +124,12 @@ export default function TenantDetailPage() {
 
   // All hooks must be called before any early returns
   const tenants = useMemo(() => {
+    if (!tenantsQuery.data) return [];
     const items = tenantsQuery.data?.data?.items;
+    if (!items) return [];
     return Array.isArray(items) ? items : [];
   }, [tenantsQuery.data]);
-  const tenant = tenants.find((item) => item.clinic.slug === slug);
+  const tenant = Array.isArray(tenants) ? tenants.find((item) => item.clinic.slug === slug) : undefined;
 
   if (tenantsQuery.isPending) {
     return (
