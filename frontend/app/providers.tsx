@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState, useEffect } from "react";
 import { NextIntlClientProvider, AbstractIntlMessages } from "next-intl";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -31,8 +31,14 @@ export function useSupportSession() {
 function SupportSessionBanner() {
   const { support, clearSupport } = useSupportSession();
   const [isStopping, setIsStopping] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-  if (!support) {
+  // Prevent hydration mismatch by only rendering on client
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || !support) {
     return null;
   }
 

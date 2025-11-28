@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import copy from "copy-to-clipboard";
 import { z } from "zod";
@@ -33,6 +33,7 @@ export default function HQTenantsPage() {
   const [formErrors, setFormErrors] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<string>("");
 
   const tenantsQuery = useQuery({
     queryKey: ["hqTenants"],
@@ -78,7 +79,19 @@ export default function HQTenantsPage() {
     },
   });
 
-  const tenants = useMemo(() => tenantsQuery.data?.data?.items ?? [], [tenantsQuery.data]);
+  const tenants = useMemo(() => {
+    const items = tenantsQuery.data?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }, [tenantsQuery.data]);
+
+  // Generate invite link only on client side to prevent hydration mismatch
+  useEffect(() => {
+    if (inviteToken && typeof window !== "undefined") {
+      setInviteLink(`${window.location.origin}/accept-invite?token=${inviteToken}`);
+    } else {
+      setInviteLink("");
+    }
+  }, [inviteToken]);
 
   function handleChange(event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     const { name, value } = event.target;
@@ -199,17 +212,19 @@ export default function HQTenantsPage() {
                       <p className="text-xs font-medium text-green-800 mb-1">Invitation Link:</p>
                       <div className="flex items-center gap-2">
                         <code className="flex-1 text-xs font-mono text-gray-700 break-all">
-                          {typeof window !== "undefined" && `${window.location.origin}/accept-invite?token=${inviteToken}`}
+                          {inviteLink || "Loading..."}
                         </code>
                         <button
                           type="button"
                           onClick={() => {
-                            const link = typeof window !== "undefined" ? `${window.location.origin}/accept-invite?token=${inviteToken}` : "";
-                            copy(link);
-                            setSuccessMessage("Invitation link copied to clipboard!");
+                            if (inviteLink) {
+                              copy(inviteLink);
+                              setSuccessMessage("Invitation link copied to clipboard!");
+                            }
                           }}
                           className="flex-shrink-0 p-1.5 rounded hover:bg-green-50 transition-colors"
                           title="Copy link"
+                          disabled={!inviteLink}
                         >
                           <Copy className="w-4 h-4 text-green-600" />
                         </button>
@@ -280,46 +295,50 @@ export default function HQTenantsPage() {
                     </td>
                   </tr>
                 ) : (
-                  tenants.map((item: any) => (
-                    <tr key={item.clinic.slug} className="hover:bg-blue-50/30 transition-colors group">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-sm group-hover:shadow-md transition-shadow">
-                            <Building2 className="w-5 h-5" />
+                  tenants.map((item: any) => {
+                    const slug = item?.clinic?.slug;
+                    if (!slug) return null;
+                    return (
+                      <tr key={slug} className="hover:bg-blue-50/30 transition-colors group">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-sm group-hover:shadow-md transition-shadow">
+                              <Building2 className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900">{item.clinic?.name || "—"}</div>
+                              <div className="text-xs text-gray-500 font-mono">{slug}</div>
+                            </div>
                           </div>
-                          <div>
-                            <div className="text-sm font-semibold text-gray-900">{item.clinic.name}</div>
-                            <div className="text-xs text-gray-500 font-mono">{item.clinic.slug}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <StatusBadge status={item.channels_status} />
-                      </td>
-                      <td className="px-6 py-4">
-                        <StatusBadge status={item.calendar_status} />
-                      </td>
-                      <td className="px-6 py-4">
-                        {item.last_ttfr_p95_ms ? (
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-gray-900">{item.last_ttfr_p95_ms}ms</span>
-                            <span className="text-xs text-gray-500">p95</span>
-                          </div>
-                        ) : (
-                          <span className="text-sm text-gray-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <Link
-                          href={`/hq/tenants/${item.clinic.slug}`}
-                          className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 font-medium text-sm transition-colors"
-                        >
-                          View Details
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </Link>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="px-6 py-4">
+                          <StatusBadge status={item.channels_status || "DISCONNECTED"} />
+                        </td>
+                        <td className="px-6 py-4">
+                          <StatusBadge status={item.calendar_status || "DISCONNECTED"} />
+                        </td>
+                        <td className="px-6 py-4">
+                          {item.last_ttfr_p95_ms ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-gray-900">{item.last_ttfr_p95_ms}ms</span>
+                              <span className="text-xs text-gray-500">p95</span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-gray-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <Link
+                            href={`/hq/tenants/${slug}`}
+                            className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 font-medium text-sm transition-colors"
+                          >
+                            View Details
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

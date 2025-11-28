@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { z } from "zod";
@@ -18,7 +18,7 @@ type LoginResponse = {
   hq_role?: string | null;
 };
 
-export default function LoginPage() {
+function LoginForm() {
   const t = useTranslations("login");
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -169,5 +169,25 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="flex items-center justify-center w-16 h-16 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg mx-auto mb-4">
+              <LogIn className="w-8 h-8" />
+            </div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Sign in</h1>
+            <p className="text-sm text-gray-600">Loading...</p>
+          </div>
+        </div>
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -24,6 +24,12 @@ export default function HQLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // Prevent hydration mismatch by only using pathname after mount
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const navItems: NavItem[] = [
     { href: "/hq", label: "Tenants", icon: Building2 },
@@ -36,6 +42,7 @@ export default function HQLayout({ children }: { children: ReactNode }) {
   };
 
   const isActive = (href: string) => {
+    if (!mounted) return false;
     if (href === "/hq") {
       return pathname === href;
     }

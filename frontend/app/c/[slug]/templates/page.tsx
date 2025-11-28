@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupportSession } from "../../../providers";
 import { z } from "zod";
+import { FileText, Search, Globe, RefreshCw, Eye, ToggleLeft, ToggleRight, X, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
 
 type TemplateItem = {
   key: string;
@@ -136,146 +137,293 @@ export default function TemplatesPage() {
     previewMutation.mutate(payload);
   }
 
-  return (
-    <main className="space-y-8 px-6 py-8">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Templates</h1>
-          <p className="text-sm text-muted-foreground">Manage WhatsApp templates for automated replies.</p>
+  if (templatesQuery.isPending) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-sm text-gray-500">Loading templates...</p>
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={lang}
-            onChange={(event) => setLang(event.target.value)}
-            className="rounded border px-3 py-2 text-sm"
-          >
-            <option value="en">English</option>
-            <option value="ar">Arabic</option>
-          </select>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search templates"
-            className="rounded border px-3 py-2 text-sm"
-          />
+      </div>
+    );
+  }
+
+  if (templatesQuery.isError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 text-center">
+        <div className="space-y-4">
+          <div className="flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mx-auto">
+            <FileText className="w-8 h-8 text-red-600" />
+          </div>
+          <div>
+            <p className="text-base font-medium text-gray-900 mb-1">Unable to load templates</p>
+            <p className="text-sm text-gray-500 mb-4">Please try again</p>
+          </div>
           <button
             type="button"
             onClick={() => templatesQuery.refetch()}
-            className="rounded border px-3 py-2 text-sm"
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
           >
-            Refresh
+            <RefreshCw className="w-4 h-4" />
+            <span>Retry</span>
           </button>
         </div>
-      </header>
-      {readOnly ? (
-        <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          You are impersonating a clinic. Template modifications are disabled until the support session ends.
-        </div>
-      ) : null}
+      </div>
+    );
+  }
 
-      {feedback ? (
-        <div className="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{feedback}</div>
-      ) : null}
-      {error ? (
-        <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      ) : null}
-
-      <section className="rounded-lg border bg-white shadow-sm">
-        <table className="min-w-full divide-y divide-border">
-          <thead className="bg-secondary/40">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Key</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Variables</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">HSM</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Enabled</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {templatesQuery.isPending ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-sm text-muted-foreground">
-                  Loading templates...
-                </td>
-              </tr>
-            ) : templates.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-sm text-muted-foreground">
-                  No templates found for this language.
-                </td>
-              </tr>
-            ) : (
-              templates.map((template) => (
-                <tr key={`${template.lang}-${template.key}`}>
-                  <td className="px-4 py-3 text-sm font-medium">{template.key}</td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">
-                    {template.variables?.length ? template.variables.join(", ") : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">{template.hsm ? "Yes" : "No"}</td>
-                  <td className="px-4 py-3 text-sm">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                        template.enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {template.enabled ? "Enabled" : "Disabled"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        className="rounded border px-2 py-1 text-xs"
-                        onClick={() => previewTemplate(template)}
-                      >
-                        Preview
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border px-2 py-1 text-xs"
-                        onClick={() => toggleTemplate(template, !template.enabled)}
-                        disabled={updateMutation.isPending || readOnly}
-                      >
-                        {template.enabled ? "Disable" : "Enable"}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </section>
-
-      {previewRequest ? (
-        <div className="rounded-lg border bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold">Preview</h2>
-              <p className="text-sm text-muted-foreground">
-                Template: <span className="font-medium">{previewRequest.template_key}</span>
-              </p>
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header Section */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 py-6">
+          <div className="flex items-start justify-between mb-6">
+            <div className="flex items-start gap-4">
+              <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 text-white shadow-lg">
+                <FileText className="w-7 h-7" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">Templates</h1>
+                <p className="text-sm text-gray-600">Manage WhatsApp templates for automated replies</p>
+              </div>
             </div>
             <button
               type="button"
-              className="text-sm text-muted-foreground underline"
-              onClick={() => {
-                setPreviewRequest(null);
-                setPreviewResult(null);
-              }}
+              onClick={() => templatesQuery.refetch()}
+              disabled={templatesQuery.isFetching}
+              className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors shadow-sm"
             >
-              Close
+              <RefreshCw className={`w-4 h-4 ${templatesQuery.isFetching ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
             </button>
           </div>
-          {previewMutation.isPending ? (
-            <p className="mt-4 text-sm text-muted-foreground">Generating preview...</p>
-          ) : previewResult ? (
-            <div className="mt-4 rounded border bg-slate-50 p-4 text-sm">
-              <pre className="whitespace-pre-wrap text-slate-700">{previewResult}</pre>
+
+          {/* Filters */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-gray-500" />
+              <select
+                value={lang}
+                onChange={(event) => setLang(event.target.value)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              >
+                <option value="en">English</option>
+                <option value="ar">Arabic</option>
+              </select>
             </div>
-          ) : null}
+            <div className="flex-1 max-w-md">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search templates..."
+                  className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+            </div>
+          </div>
         </div>
-      ) : null}
-    </main>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {/* Alerts */}
+        {readOnly && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-900">Read-only mode</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                You are impersonating a clinic. Template modifications are disabled until the support session ends.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {feedback && (
+          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-green-900">{feedback}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFeedback(null)}
+              className="text-green-600 hover:text-green-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-900">{error}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="text-red-600 hover:text-red-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Templates Table */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+                <tr>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    Template Key
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    Variables
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    HSM
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {templates.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center">
+                      <div className="flex flex-col items-center">
+                        <FileText className="w-12 h-12 text-gray-400 mb-3" />
+                        <p className="text-sm font-medium text-gray-900 mb-1">No templates found</p>
+                        <p className="text-xs text-gray-500">Try changing the language or search term</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  templates.map((template) => (
+                    <tr key={`${template.lang}-${template.key}`} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-semibold text-gray-900">{template.key}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm text-gray-600">
+                          {template.variables?.length ? (
+                            <div className="flex flex-wrap gap-1">
+                              {template.variables.map((variable, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
+                                >
+                                  {variable}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            template.hsm ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {template.hsm ? "Yes" : "No"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            template.enabled ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {template.enabled ? "Enabled" : "Disabled"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+                            onClick={() => previewTemplate(template)}
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Preview</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              template.enabled
+                                ? "text-amber-600 hover:bg-amber-50"
+                                : "text-green-600 hover:bg-green-50"
+                            }`}
+                            onClick={() => toggleTemplate(template, !template.enabled)}
+                            disabled={updateMutation.isPending || readOnly}
+                          >
+                            {template.enabled ? (
+                              <>
+                                <ToggleRight className="w-3.5 h-3.5" />
+                                <span>Disable</span>
+                              </>
+                            ) : (
+                              <>
+                                <ToggleLeft className="w-3.5 h-3.5" />
+                                <span>Enable</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Preview Modal */}
+        {previewRequest && (
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Template Preview</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Template: <span className="font-medium text-gray-900">{previewRequest.template_key}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                onClick={() => {
+                  setPreviewRequest(null);
+                  setPreviewResult(null);
+                }}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {previewMutation.isPending ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-3 text-sm text-gray-600">Generating preview...</span>
+              </div>
+            ) : previewResult ? (
+              <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">{previewResult}</pre>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

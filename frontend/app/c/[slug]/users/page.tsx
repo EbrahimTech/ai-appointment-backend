@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupportSession } from "../../../providers";
 import { z } from "zod";
+import { Users, UserPlus, RefreshCw, Mail, Shield, Edit, Trash2, X, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
 
 type Membership = {
   id: number;
@@ -148,170 +149,264 @@ export default function UsersPage() {
 
   if (usersQuery.isPending) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading users...</p>
-      </main>
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-sm text-gray-500">Loading users...</p>
+        </div>
+      </div>
     );
   }
 
   if (usersQuery.isError) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-4 text-center">
-        <div className="space-y-3">
-          <p className="text-sm text-red-600">Unable to load users.</p>
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 text-center">
+        <div className="space-y-4">
+          <div className="flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mx-auto">
+            <Users className="w-8 h-8 text-red-600" />
+          </div>
+          <div>
+            <p className="text-base font-medium text-gray-900 mb-1">Unable to load users</p>
+            <p className="text-sm text-gray-500 mb-4">Please try again</p>
+          </div>
           <button
             type="button"
             onClick={() => usersQuery.refetch()}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
           >
-            Retry
+            <RefreshCw className="w-4 h-4" />
+            <span>Retry</span>
           </button>
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="space-y-8 px-6 py-8">
-      <header>
-        <h1 className="text-2xl font-semibold">Clinic members</h1>
-        <p className="text-sm text-muted-foreground">Invite staff and manage access roles.</p>
-      </header>
-      {readOnly ? (
-        <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          You are impersonating a clinic. Member management is disabled until the support session ends.
+    <div className="min-h-screen bg-gray-50">
+      {/* Header Section */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 py-6">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-600 text-white shadow-lg">
+                <Users className="w-7 h-7" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">Clinic Members</h1>
+                <p className="text-sm text-gray-600">Invite staff and manage access roles</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => usersQuery.refetch()}
+              disabled={usersQuery.isFetching}
+              className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors shadow-sm"
+            >
+              <RefreshCw className={`w-4 h-4 ${usersQuery.isFetching ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
-      ) : null}
+      </div>
 
-      {feedback ? (
-        <div className="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{feedback}</div>
-      ) : null}
-      {error ? (
-        <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      ) : null}
-
-      <section className="rounded-lg border bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold">Invite member</h2>
-        <form className="mt-4 flex flex-col gap-4 md:flex-row" onSubmit={handleInvite}>
-          <div className="flex-1 space-y-1">
-            <label className="text-sm font-medium" htmlFor="invite-email">
-              Email
-            </label>
-            <input
-              id="invite-email"
-              name="email"
-              type="email"
-              className="w-full rounded border px-3 py-2 text-sm"
-              placeholder="staff@example.com"
-              required
-            />
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {/* Alerts */}
+        {readOnly && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-900">Read-only mode</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                You are impersonating a clinic. Member management is disabled until the support session ends.
+              </p>
+            </div>
           </div>
-          <div className="space-y-1">
-            <label className="text-sm font-medium" htmlFor="invite-role">
-              Role
-            </label>
-            <select id="invite-role" name="role" className="w-full rounded border px-3 py-2 text-sm">
-              <option value="ADMIN">ADMIN</option>
-              <option value="STAFF">STAFF</option>
-              <option value="VIEWER">VIEWER</option>
-            </select>
-          </div>
-          <button
-            type="submit"
-            className="self-end rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-            disabled={inviteMutation.isPending || readOnly}
-          >
-            {inviteMutation.isPending ? "Inviting..." : "Invite"}
-          </button>
-        </form>
-      </section>
+        )}
 
-      <section className="overflow-hidden rounded-lg border bg-white shadow-sm">
-        <table className="min-w-full divide-y divide-border">
-          <thead className="bg-secondary/40">
-            <tr>
-              <Header label="Name" />
-              <Header label="Email" />
-              <Header label="Role" />
-              <Header label="Actions" align="right" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {users.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-sm text-muted-foreground">
-                  No members yet.
-                </td>
-              </tr>
-            ) : (
-              users.map((user) => (
-                <tr key={user.id}>
-                  <Cell>{user.name || "—"}</Cell>
-                  <Cell>{user.email}</Cell>
-                  <Cell>
-                    {selectedId === user.id ? (
-                      <select
-                        defaultValue={user.role}
-                        onChange={(event) =>
-                          updateMutation.mutate({ id: user.id, role: event.target.value as Membership["role"] })
-                        }
-                        className="rounded border px-2 py-1 text-sm"
-                      >
-                        <option value="OWNER">OWNER</option>
-                        <option value="ADMIN">ADMIN</option>
-                        <option value="STAFF">STAFF</option>
-                        <option value="VIEWER">VIEWER</option>
-                      </select>
-                    ) : (
-                      <span className="text-sm font-medium">{user.role}</span>
-                    )}
-                  </Cell>
-                  <Cell align="right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        className="rounded border px-3 py-1 text-xs disabled:opacity-50"
-                        onClick={() => setSelectedId(selectedId === user.id ? null : user.id)}
-                        disabled={readOnly}
-                      >
-                        {selectedId === user.id ? "Close" : "Change role"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border px-3 py-1 text-xs text-red-600"
-                        onClick={() => {
-                          if (readOnly) {
-                            setError("Cannot remove members while impersonating.");
-                            return;
-                          }
-                          removeMutation.mutate(user.id);
-                        }}
-                        disabled={removeMutation.isPending || readOnly}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </Cell>
+        {feedback && (
+          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-green-900">{feedback}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFeedback(null)}
+              className="text-green-600 hover:text-green-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-900">{error}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="text-red-600 hover:text-red-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Invite Member Section */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-100">
+              <UserPlus className="w-5 h-5 text-blue-600" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Invite Member</h2>
+          </div>
+          <form className="flex flex-col gap-4 md:flex-row md:items-end" onSubmit={handleInvite}>
+            <div className="flex-1 space-y-2">
+              <label className="block text-sm font-medium text-gray-700" htmlFor="invite-email">
+                <Mail className="w-4 h-4 inline mr-1" />
+                Email Address
+              </label>
+              <input
+                id="invite-email"
+                name="email"
+                type="email"
+                className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                placeholder="staff@example.com"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700" htmlFor="invite-role">
+                <Shield className="w-4 h-4 inline mr-1" />
+                Role
+              </label>
+              <select
+                id="invite-role"
+                name="role"
+                className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              >
+                <option value="ADMIN">ADMIN</option>
+                <option value="STAFF">STAFF</option>
+                <option value="VIEWER">VIEWER</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+              disabled={inviteMutation.isPending || readOnly}
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>{inviteMutation.isPending ? "Inviting..." : "Invite"}</span>
+            </button>
+          </form>
+        </div>
+
+        {/* Members Table */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+                <tr>
+                  <Header label="Name" />
+                  <Header label="Email" />
+                  <Header label="Role" />
+                  <Header label="Actions" align="right" />
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </section>
-    </main>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {users.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-12 text-center">
+                      <div className="flex flex-col items-center">
+                        <Users className="w-12 h-12 text-gray-400 mb-3" />
+                        <p className="text-sm font-medium text-gray-900 mb-1">No members yet</p>
+                        <p className="text-xs text-gray-500">Invite your first team member to get started</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  users.map((user) => (
+                    <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                      <Cell>
+                        <div className="text-sm font-medium text-gray-900">{user.name || "—"}</div>
+                      </Cell>
+                      <Cell>
+                        <div className="text-sm text-gray-600">{user.email}</div>
+                      </Cell>
+                      <Cell>
+                        {selectedId === user.id ? (
+                          <select
+                            defaultValue={user.role}
+                            onChange={(event) =>
+                              updateMutation.mutate({ id: user.id, role: event.target.value as Membership["role"] })
+                            }
+                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                          >
+                            <option value="OWNER">OWNER</option>
+                            <option value="ADMIN">ADMIN</option>
+                            <option value="STAFF">STAFF</option>
+                            <option value="VIEWER">VIEWER</option>
+                          </select>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            {user.role}
+                          </span>
+                        )}
+                      </Cell>
+                      <Cell align="right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                            onClick={() => setSelectedId(selectedId === user.id ? null : user.id)}
+                            disabled={readOnly}
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                            <span>{selectedId === user.id ? "Close" : "Change Role"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                            onClick={() => {
+                              if (readOnly) {
+                                setError("Cannot remove members while impersonating.");
+                                return;
+                              }
+                              removeMutation.mutate(user.id);
+                            }}
+                            disabled={removeMutation.isPending || readOnly}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Remove</span>
+                          </button>
+                        </div>
+                      </Cell>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
 function Header({ label, align = "left" }: { label: string; align?: "left" | "right" }) {
   return (
-    <th className={`px-4 py-3 text-xs font-semibold uppercase text-muted-foreground ${align === "right" ? "text-right" : "text-left"}`}>
+    <th className={`px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${align === "right" ? "text-right" : "text-left"}`}>
       {label}
     </th>
   );
 }
 
 function Cell({ children, align = "left" }: { children: React.ReactNode; align?: "left" | "right" }) {
-  return <td className={`px-4 py-3 text-sm ${align === "right" ? "text-right" : ""}`}>{children}</td>;
+  return <td className={`px-6 py-4 whitespace-nowrap text-sm ${align === "right" ? "text-right" : ""}`}>{children}</td>;
 }
 
 function humanizeError(code: string | undefined) {
