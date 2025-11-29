@@ -57,11 +57,14 @@ class ClinicScopeMiddleware:
             if clinic is None:
                 return JsonResponse({"ok": False, "error": "CLINIC_NOT_FOUND"}, status=404)
 
+            # SUPERADMIN gets ADMIN role (full access), OPS gets VIEWER role (read-only)
+            hq_role = ClinicMembership.Role.ADMIN if staff.role == StaffAccount.Role.SUPERADMIN else ClinicMembership.Role.VIEWER
+            
             # Create virtual membership for HQ staff
             membership = ClinicMembership(
                 clinic=clinic,
                 user=user,
-                role=ClinicMembership.Role.ADMIN,
+                role=hq_role,
             )
             request.clinic_membership = membership
             request.clinic = clinic
