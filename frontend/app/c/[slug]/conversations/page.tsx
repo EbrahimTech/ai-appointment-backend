@@ -156,93 +156,93 @@ export default function ClinicConversationsPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700" htmlFor="status">
-                Status
-              </label>
-              <select
-                id="status"
-                name="status"
-                value={filters.status}
-                onChange={updateFilter}
+              Status
+            </label>
+            <select
+              id="status"
+              name="status"
+              value={filters.status}
+              onChange={updateFilter}
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              >
-                {statuses.map((option) => (
-                  <option key={option} value={option}>
+            >
+              {statuses.map((option) => (
+                <option key={option} value={option}>
                     {option ? option.charAt(0).toUpperCase() + option.slice(1) : "All Statuses"}
-                  </option>
-                ))}
-              </select>
-            </div>
+                </option>
+              ))}
+            </select>
+          </div>
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700" htmlFor="intent">
-                Intent
-              </label>
-              <input
-                id="intent"
-                name="intent"
-                value={filters.intent}
-                onChange={updateFilter}
+              Intent
+            </label>
+            <input
+              id="intent"
+              name="intent"
+              value={filters.intent}
+              onChange={updateFilter}
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 placeholder="e.g. booking, inquiry"
-              />
-            </div>
+            />
+          </div>
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700" htmlFor="lang">
                 <Globe className="w-4 h-4 inline mr-1" />
-                Language
-              </label>
-              <select
-                id="lang"
-                name="lang"
-                value={filters.lang}
-                onChange={updateFilter}
+              Language
+            </label>
+            <select
+              id="lang"
+              name="lang"
+              value={filters.lang}
+              onChange={updateFilter}
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              >
+            >
                 <option value="">All Languages</option>
                 <option value="en">English</option>
                 <option value="ar">Arabic</option>
-              </select>
-            </div>
+            </select>
+          </div>
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700" htmlFor="q">
                 <Search className="w-4 h-4 inline mr-1" />
-                Search
-              </label>
-              <input
-                id="q"
-                name="q"
-                value={filters.q}
-                onChange={updateFilter}
+              Search
+            </label>
+            <input
+              id="q"
+              name="q"
+              value={filters.q}
+              onChange={updateFilter}
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 placeholder="Phone number or keyword"
-              />
-            </div>
+            />
+          </div>
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700" htmlFor="from">
                 <Calendar className="w-4 h-4 inline mr-1" />
                 From Date
-              </label>
-              <input
-                id="from"
-                name="from"
-                type="datetime-local"
-                value={filters.from}
-                onChange={updateFilter}
+            </label>
+            <input
+              id="from"
+              name="from"
+              type="datetime-local"
+              value={filters.from}
+              onChange={updateFilter}
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              />
-            </div>
+            />
+          </div>
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700" htmlFor="to">
                 <Calendar className="w-4 h-4 inline mr-1" />
                 To Date
-              </label>
-              <input
-                id="to"
-                name="to"
-                type="datetime-local"
-                value={filters.to}
-                onChange={updateFilter}
+            </label>
+            <input
+              id="to"
+              name="to"
+              type="datetime-local"
+              value={filters.to}
+              onChange={updateFilter}
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              />
+            />
             </div>
           </div>
         </div>
@@ -252,7 +252,7 @@ export default function ClinicConversationsPage() {
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <tr>
+            <tr>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     Patient
                   </th>
@@ -271,30 +271,30 @@ export default function ClinicConversationsPage() {
                   <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     Actions
                   </th>
-                </tr>
-              </thead>
+            </tr>
+          </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {data.items.length === 0 ? (
-                  <tr>
+            {data.items.length === 0 ? (
+              <tr>
                     <td colSpan={6} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center">
                         <MessageSquare className="w-12 h-12 text-gray-400 mb-3" />
                         <p className="text-sm font-medium text-gray-900 mb-1">No conversations found</p>
                         <p className="text-xs text-gray-500">Try adjusting your filters</p>
                       </div>
-                    </td>
-                  </tr>
-                ) : (
-                  data.items.map((item) => (
+                </td>
+              </tr>
+            ) : (
+              data.items.map((item) => (
                     <tr key={item.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
-                          {item.patient?.phone ?? "Unknown"}
+                    {item.patient?.phone ?? "Unknown"}
                         </div>
-                      </td>
+                  </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-600">
-                          {item.last_message_at ? new Date(item.last_message_at).toLocaleString() : "—"}
+                    {item.last_message_at ? new Date(item.last_message_at).toLocaleString() : "—"}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -304,37 +304,37 @@ export default function ClinicConversationsPage() {
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 uppercase">
                           {item.lang || "—"}
                         </span>
-                      </td>
+                  </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <StatusPill status={item.status} />
-                      </td>
+                    <StatusPill status={item.status} />
+                  </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <button
-                          type="button"
+                    <button
+                      type="button"
                           className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-800 transition-colors"
-                          onClick={() => router.push(`/c/${slug}/conversations/${item.id}`)}
-                        >
+                      onClick={() => router.push(`/c/${slug}/conversations/${item.id}`)}
+                    >
                           <Eye className="w-4 h-4" />
                           <span>View</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
           </div>
         </div>
 
         {/* Pagination */}
         {data.total > (filters.size ?? 20) && (
           <div className="mt-6">
-            <PaginationControls
-              current={data.page}
-              size={data.size}
-              total={data.total}
-              onChange={handlePagination}
-            />
+        <PaginationControls
+          current={data.page}
+          size={data.size}
+          total={data.total}
+          onChange={handlePagination}
+        />
           </div>
         )}
       </div>

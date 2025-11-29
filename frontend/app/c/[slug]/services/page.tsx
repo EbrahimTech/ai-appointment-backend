@@ -277,8 +277,8 @@ export default function ServicesPage() {
             <div className="flex-1">
               <p className="text-sm font-medium text-red-900">{error}</p>
             </div>
-            <button
-              type="button"
+          <button
+            type="button"
               onClick={() => setError(null)}
               className="text-red-600 hover:text-red-800"
             >
@@ -294,75 +294,75 @@ export default function ServicesPage() {
               <Settings className="w-5 h-5 text-indigo-600" />
             </div>
             <h2 className="text-lg font-semibold text-gray-900">Services</h2>
-          </div>
-          <form className="space-y-4" onSubmit={handleServicesSubmit}>
-            <input type="hidden" name="rows" value={services.length} />
-            {services.map((service, index) => (
+        </div>
+        <form className="space-y-4" onSubmit={handleServicesSubmit}>
+          <input type="hidden" name="rows" value={services.length} />
+          {services.map((service, index) => (
               <div key={service.code} className="rounded-lg border border-gray-200 bg-gray-50 px-5 py-4">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <Field label="Code">
-                    <input
-                      name={`service_code_${index}`}
-                      defaultValue={service.code}
+              <div className="grid gap-4 md:grid-cols-3">
+                <Field label="Code">
+                  <input
+                    name={`service_code_${index}`}
+                    defaultValue={service.code}
                       className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
-                  <Field label="Name">
-                    <input
-                      name={`service_name_${index}`}
-                      defaultValue={service.name}
+                    required
+                  />
+                </Field>
+                <Field label="Name">
+                  <input
+                    name={`service_name_${index}`}
+                    defaultValue={service.name}
                       className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
-                  <Field label="Duration (minutes)">
-                    <input
-                      name={`service_duration_${index}`}
-                      type="number"
-                      defaultValue={service.duration_minutes}
+                    required
+                  />
+                </Field>
+                <Field label="Duration (minutes)">
+                  <input
+                    name={`service_duration_${index}`}
+                    type="number"
+                    defaultValue={service.duration_minutes}
                       className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
-                  <Field label="Language">
-                    <input
-                      name={`service_lang_${index}`}
-                      defaultValue={service.language}
+                    required
+                  />
+                </Field>
+                <Field label="Language">
+                  <input
+                    name={`service_lang_${index}`}
+                    defaultValue={service.language}
                       className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
-                  <Field label="Active">
+                    required
+                  />
+                </Field>
+                <Field label="Active">
                     <div className="flex items-center">
-                      <input
-                        name={`service_active_${index}`}
-                        type="checkbox"
-                        defaultChecked={service.is_active}
+                  <input
+                    name={`service_active_${index}`}
+                    type="checkbox"
+                    defaultChecked={service.is_active}
                         className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
+                  />
                     </div>
-                  </Field>
-                  <Field label="Description" className="md:col-span-3">
-                    <textarea
-                      name={`service_desc_${index}`}
-                      defaultValue={service.description}
+                </Field>
+                <Field label="Description" className="md:col-span-3">
+                  <textarea
+                    name={`service_desc_${index}`}
+                    defaultValue={service.description}
                       rows={2}
                       className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                    />
-                  </Field>
-                </div>
+                  />
+                </Field>
               </div>
-            ))}
-            <button
-              type="submit"
+            </div>
+          ))}
+          <button
+            type="submit"
               className="flex items-center gap-2 rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
-              disabled={updateServices.isPending || readOnly}
-            >
+            disabled={updateServices.isPending || readOnly}
+          >
               <Save className="w-4 h-4" />
               <span>{updateServices.isPending ? "Saving..." : "Save Services"}</span>
-            </button>
-          </form>
+          </button>
+        </form>
         </div>
 
         {/* Service Hours Section */}
@@ -372,59 +372,59 @@ export default function ServicesPage() {
               <Clock className="w-5 h-5 text-purple-600" />
             </div>
             <h2 className="text-lg font-semibold text-gray-900">Service Hours</h2>
-          </div>
-          <form className="space-y-4" onSubmit={handleHoursSubmit}>
-            <input type="hidden" name="rows_hours" value={hours.length} />
-            {hours.map((hour, index) => (
+        </div>
+        <form className="space-y-4" onSubmit={handleHoursSubmit}>
+          <input type="hidden" name="rows_hours" value={hours.length} />
+          {hours.map((hour, index) => (
               <div key={`${hour.service_code}-${hour.weekday}-${index}`} className="rounded-lg border border-gray-200 bg-gray-50 px-5 py-4">
-                <div className="grid gap-4 md:grid-cols-4">
+              <div className="grid gap-4 md:grid-cols-4">
                   <Field label="Service Code">
-                    <input
-                      name={`hour_service_${index}`}
-                      defaultValue={hour.service_code}
+                  <input
+                    name={`hour_service_${index}`}
+                    defaultValue={hour.service_code}
                       className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
-                  <Field label="Weekday (0=Mon)">
-                    <input
-                      name={`hour_weekday_${index}`}
-                      type="number"
-                      min={0}
-                      max={6}
-                      defaultValue={hour.weekday}
+                    required
+                  />
+                </Field>
+                <Field label="Weekday (0=Mon)">
+                  <input
+                    name={`hour_weekday_${index}`}
+                    type="number"
+                    min={0}
+                    max={6}
+                    defaultValue={hour.weekday}
                       className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
+                    required
+                  />
+                </Field>
                   <Field label="Start Time (HH:MM)">
-                    <input
-                      name={`hour_start_${index}`}
-                      defaultValue={hour.start_time}
+                  <input
+                    name={`hour_start_${index}`}
+                    defaultValue={hour.start_time}
                       className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
+                    required
+                  />
+                </Field>
                   <Field label="End Time (HH:MM)">
-                    <input
-                      name={`hour_end_${index}`}
-                      defaultValue={hour.end_time}
+                  <input
+                    name={`hour_end_${index}`}
+                    defaultValue={hour.end_time}
                       className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
-                </div>
+                    required
+                  />
+                </Field>
               </div>
-            ))}
-            <button
-              type="submit"
+            </div>
+          ))}
+          <button
+            type="submit"
               className="flex items-center gap-2 rounded-lg bg-purple-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm"
-              disabled={updateHours.isPending || readOnly}
-            >
+            disabled={updateHours.isPending || readOnly}
+          >
               <Save className="w-4 h-4" />
               <span>{updateHours.isPending ? "Saving..." : "Save Hours"}</span>
-            </button>
-          </form>
+          </button>
+        </form>
         </div>
       </div>
     </div>

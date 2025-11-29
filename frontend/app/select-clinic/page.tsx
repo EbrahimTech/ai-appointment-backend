@@ -22,19 +22,19 @@ export default function SelectClinicPage() {
     (async () => {
       try {
         setLoading(true);
-        const response = await fetch("/api/session/me");
-        if (response.status === 401) {
-          router.replace("/login");
-          return;
-        }
-        const data = await response.json();
-        if (data?.data?.clinics?.length) {
-          setClinics(data.data.clinics);
+      const response = await fetch("/api/session/me");
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      const data = await response.json();
+      if (data?.data?.clinics?.length) {
+        setClinics(data.data.clinics);
           // Auto-select if only one clinic
           if (data.data.clinics.length === 1) {
             setSelected(data.data.clinics[0].slug);
           }
-        } else {
+      } else {
           router.replace("/login");
         }
       } catch (error) {
@@ -49,14 +49,14 @@ export default function SelectClinicPage() {
     if (!selected || submitting) return;
     try {
       setSubmitting(true);
-      const response = await fetch("/api/session/select-clinic", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: selected }),
-      });
-      if (response.ok) {
-        router.replace(`/c/${selected}/dashboard`);
-      }
+    const response = await fetch("/api/session/select-clinic", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: selected }),
+    });
+    if (response.ok) {
+      router.replace(`/c/${selected}/dashboard`);
+    }
     } catch (error) {
       // Handle error
     } finally {
@@ -130,29 +130,29 @@ export default function SelectClinicPage() {
                           {clinic.role}
                         </span>
                       </div>
-                      <input
-                        type="radio"
-                        name="clinic"
-                        value={clinic.slug}
+              <input
+                type="radio"
+                name="clinic"
+                value={clinic.slug}
                         checked={isSelected}
-                        onChange={() => setSelected(clinic.slug)}
+                onChange={() => setSelected(clinic.slug)}
                         className="sr-only"
-                      />
-                    </label>
+              />
+            </label>
                   );
                 })}
               </div>
             )}
-          </div>
+        </div>
 
           {/* Continue Button */}
           <div className="px-6 pb-6 pt-4 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={handleContinue}
+        <button
+          type="button"
+          onClick={handleContinue}
               disabled={!selected || submitting}
               className="w-full flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
-            >
+        >
               {submitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -164,7 +164,7 @@ export default function SelectClinicPage() {
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
-            </button>
+        </button>
           </div>
         </div>
       </div>

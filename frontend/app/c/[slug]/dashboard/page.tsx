@@ -87,25 +87,25 @@ export default function ClinicDashboardPage() {
       {/* Header Section */}
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between">
             <div className="flex items-start gap-4">
               <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
                 <Activity className="w-7 h-7" />
               </div>
-              <div>
+        <div>
                 <h1 className="text-3xl font-bold text-gray-900 mb-2 capitalize">{slug} Dashboard</h1>
                 <p className="text-sm text-gray-600">Daily performance snapshot and key metrics</p>
               </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => dashboardQuery.refetch()}
+        </div>
+        <button
+          type="button"
+          onClick={() => dashboardQuery.refetch()}
               disabled={dashboardQuery.isFetching}
               className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors shadow-sm"
-            >
+        >
               <RefreshCw className={`w-4 h-4 ${dashboardQuery.isFetching ? "animate-spin" : ""}`} />
               <span>Refresh</span>
-            </button>
+        </button>
           </div>
         </div>
       </div>
@@ -163,7 +163,7 @@ export default function ClinicDashboardPage() {
               bgColor="bg-indigo-50"
               description="Pending calendar synchronizations"
               badge={data.tentative_today > 0 ? { text: "Action needed", variant: "warning" } : undefined}
-            />
+          />
           )}
           {typeof data.failed_count === "number" && (
             <MetricCard
@@ -176,7 +176,7 @@ export default function ClinicDashboardPage() {
               badge={data.failed_count > 0 ? { text: "Investigate", variant: "destructive" } : undefined}
             />
           )}
-        </div>
+              </div>
       </div>
     </div>
   );

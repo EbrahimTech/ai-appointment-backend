@@ -269,40 +269,40 @@ export default function UsersPage() {
               <label className="block text-sm font-medium text-gray-700" htmlFor="invite-email">
                 <Mail className="w-4 h-4 inline mr-1" />
                 Email Address
-              </label>
-              <input
-                id="invite-email"
-                name="email"
-                type="email"
+            </label>
+            <input
+              id="invite-email"
+              name="email"
+              type="email"
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                placeholder="staff@example.com"
-                required
-              />
-            </div>
+              placeholder="staff@example.com"
+              required
+            />
+          </div>
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700" htmlFor="invite-role">
                 <Shield className="w-4 h-4 inline mr-1" />
-                Role
-              </label>
+              Role
+            </label>
               <select
                 id="invite-role"
                 name="role"
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               >
-                <option value="ADMIN">ADMIN</option>
-                <option value="STAFF">STAFF</option>
-                <option value="VIEWER">VIEWER</option>
-              </select>
-            </div>
-            <button
-              type="submit"
+              <option value="ADMIN">ADMIN</option>
+              <option value="STAFF">STAFF</option>
+              <option value="VIEWER">VIEWER</option>
+            </select>
+          </div>
+          <button
+            type="submit"
               className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
-              disabled={inviteMutation.isPending || readOnly}
-            >
+            disabled={inviteMutation.isPending || readOnly}
+          >
               <UserPlus className="w-4 h-4" />
               <span>{inviteMutation.isPending ? "Inviting..." : "Invite"}</span>
-            </button>
-          </form>
+          </button>
+        </form>
         </div>
 
         {/* Members Table */}
@@ -310,26 +310,26 @@ export default function UsersPage() {
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <tr>
-                  <Header label="Name" />
-                  <Header label="Email" />
-                  <Header label="Role" />
-                  <Header label="Actions" align="right" />
-                </tr>
-              </thead>
+            <tr>
+              <Header label="Name" />
+              <Header label="Email" />
+              <Header label="Role" />
+              <Header label="Actions" align="right" />
+            </tr>
+          </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {users.length === 0 ? (
-                  <tr>
+            {users.length === 0 ? (
+              <tr>
                     <td colSpan={4} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center">
                         <Users className="w-12 h-12 text-gray-400 mb-3" />
                         <p className="text-sm font-medium text-gray-900 mb-1">No members yet</p>
                         <p className="text-xs text-gray-500">Invite your first team member to get started</p>
                       </div>
-                    </td>
-                  </tr>
-                ) : (
-                  users.map((user) => (
+                </td>
+              </tr>
+            ) : (
+              users.map((user) => (
                     <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                       <Cell>
                         <div className="text-sm font-medium text-gray-900">{user.name || "—"}</div>
@@ -337,59 +337,59 @@ export default function UsersPage() {
                       <Cell>
                         <div className="text-sm text-gray-600">{user.email}</div>
                       </Cell>
-                      <Cell>
-                        {selectedId === user.id ? (
-                          <select
-                            defaultValue={user.role}
-                            onChange={(event) =>
-                              updateMutation.mutate({ id: user.id, role: event.target.value as Membership["role"] })
-                            }
+                  <Cell>
+                    {selectedId === user.id ? (
+                      <select
+                        defaultValue={user.role}
+                        onChange={(event) =>
+                          updateMutation.mutate({ id: user.id, role: event.target.value as Membership["role"] })
+                        }
                             className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                          >
-                            <option value="OWNER">OWNER</option>
-                            <option value="ADMIN">ADMIN</option>
-                            <option value="STAFF">STAFF</option>
-                            <option value="VIEWER">VIEWER</option>
-                          </select>
-                        ) : (
+                      >
+                        <option value="OWNER">OWNER</option>
+                        <option value="ADMIN">ADMIN</option>
+                        <option value="STAFF">STAFF</option>
+                        <option value="VIEWER">VIEWER</option>
+                      </select>
+                    ) : (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                             {user.role}
                           </span>
-                        )}
-                      </Cell>
-                      <Cell align="right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
+                    )}
+                  </Cell>
+                  <Cell align="right">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
-                            onClick={() => setSelectedId(selectedId === user.id ? null : user.id)}
-                            disabled={readOnly}
-                          >
+                        onClick={() => setSelectedId(selectedId === user.id ? null : user.id)}
+                        disabled={readOnly}
+                      >
                             <Edit className="w-3.5 h-3.5" />
                             <span>{selectedId === user.id ? "Close" : "Change Role"}</span>
-                          </button>
-                          <button
-                            type="button"
+                      </button>
+                      <button
+                        type="button"
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
-                            onClick={() => {
-                              if (readOnly) {
-                                setError("Cannot remove members while impersonating.");
-                                return;
-                              }
-                              removeMutation.mutate(user.id);
-                            }}
-                            disabled={removeMutation.isPending || readOnly}
-                          >
+                        onClick={() => {
+                          if (readOnly) {
+                            setError("Cannot remove members while impersonating.");
+                            return;
+                          }
+                          removeMutation.mutate(user.id);
+                        }}
+                        disabled={removeMutation.isPending || readOnly}
+                      >
                             <Trash2 className="w-3.5 h-3.5" />
                             <span>Remove</span>
-                          </button>
-                        </div>
-                      </Cell>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                      </button>
+                    </div>
+                  </Cell>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
           </div>
         </div>
       </div>

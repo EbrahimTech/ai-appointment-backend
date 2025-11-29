@@ -149,13 +149,13 @@ export default function TemplatesPage() {
   }
 
   if (templatesQuery.isError) {
-    return (
+  return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 text-center">
         <div className="space-y-4">
           <div className="flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mx-auto">
             <FileText className="w-8 h-8 text-red-600" />
           </div>
-          <div>
+        <div>
             <p className="text-base font-medium text-gray-900 mb-1">Unable to load templates</p>
             <p className="text-sm text-gray-500 mb-4">Please try again</p>
           </div>
@@ -200,23 +200,23 @@ export default function TemplatesPage() {
 
           {/* Filters */}
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
               <Globe className="w-4 h-4 text-gray-500" />
-              <select
-                value={lang}
-                onChange={(event) => setLang(event.target.value)}
+          <select
+            value={lang}
+            onChange={(event) => setLang(event.target.value)}
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              >
-                <option value="en">English</option>
-                <option value="ar">Arabic</option>
-              </select>
+          >
+            <option value="en">English</option>
+            <option value="ar">Arabic</option>
+          </select>
             </div>
             <div className="flex-1 max-w-md">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search templates..."
                   className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 />
@@ -246,14 +246,14 @@ export default function TemplatesPage() {
             <div className="flex-1">
               <p className="text-sm font-medium text-green-900">{feedback}</p>
             </div>
-            <button
-              type="button"
+          <button
+            type="button"
               onClick={() => setFeedback(null)}
               className="text-green-600 hover:text-green-800"
-            >
+          >
               <X className="w-4 h-4" />
-            </button>
-          </div>
+          </button>
+        </div>
         )}
 
         {error && (
@@ -269,7 +269,7 @@ export default function TemplatesPage() {
             >
               <X className="w-4 h-4" />
             </button>
-          </div>
+        </div>
         )}
 
         {/* Templates Table */}
@@ -277,7 +277,7 @@ export default function TemplatesPage() {
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <tr>
+            <tr>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     Template Key
                   </th>
@@ -293,21 +293,21 @@ export default function TemplatesPage() {
                   <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     Actions
                   </th>
-                </tr>
-              </thead>
+            </tr>
+          </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {templates.length === 0 ? (
-                  <tr>
+              <tr>
                     <td colSpan={5} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center">
                         <FileText className="w-12 h-12 text-gray-400 mb-3" />
                         <p className="text-sm font-medium text-gray-900 mb-1">No templates found</p>
                         <p className="text-xs text-gray-500">Try changing the language or search term</p>
                       </div>
-                    </td>
-                  </tr>
-                ) : (
-                  templates.map((template) => (
+                </td>
+              </tr>
+            ) : (
+              templates.map((template) => (
                     <tr key={`${template.lang}-${template.key}`} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-semibold text-gray-900">{template.key}</div>
@@ -338,36 +338,36 @@ export default function TemplatesPage() {
                         >
                           {template.hsm ? "Yes" : "No"}
                         </span>
-                      </td>
+                  </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span
+                    <span
                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                             template.enabled ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"
-                          }`}
-                        >
-                          {template.enabled ? "Enabled" : "Disabled"}
-                        </span>
-                      </td>
+                      }`}
+                    >
+                      {template.enabled ? "Enabled" : "Disabled"}
+                    </span>
+                  </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-                            onClick={() => previewTemplate(template)}
-                          >
+                        onClick={() => previewTemplate(template)}
+                      >
                             <Eye className="w-3.5 h-3.5" />
                             <span>Preview</span>
-                          </button>
-                          <button
-                            type="button"
+                      </button>
+                      <button
+                        type="button"
                             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                               template.enabled
                                 ? "text-amber-600 hover:bg-amber-50"
                                 : "text-green-600 hover:bg-green-50"
                             }`}
-                            onClick={() => toggleTemplate(template, !template.enabled)}
-                            disabled={updateMutation.isPending || readOnly}
-                          >
+                        onClick={() => toggleTemplate(template, !template.enabled)}
+                        disabled={updateMutation.isPending || readOnly}
+                      >
                             {template.enabled ? (
                               <>
                                 <ToggleRight className="w-3.5 h-3.5" />
@@ -379,14 +379,14 @@ export default function TemplatesPage() {
                                 <span>Enable</span>
                               </>
                             )}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
           </div>
         </div>
 
@@ -394,34 +394,34 @@ export default function TemplatesPage() {
         {previewRequest && (
           <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-6">
             <div className="flex items-center justify-between mb-4">
-              <div>
+            <div>
                 <h2 className="text-lg font-semibold text-gray-900">Template Preview</h2>
                 <p className="text-sm text-gray-600 mt-1">
                   Template: <span className="font-medium text-gray-900">{previewRequest.template_key}</span>
-                </p>
-              </div>
-              <button
-                type="button"
-                className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                onClick={() => {
-                  setPreviewRequest(null);
-                  setPreviewResult(null);
-                }}
-              >
-                <X className="w-5 h-5" />
-              </button>
+              </p>
             </div>
-            {previewMutation.isPending ? (
+            <button
+              type="button"
+                className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              onClick={() => {
+                setPreviewRequest(null);
+                setPreviewResult(null);
+              }}
+            >
+                <X className="w-5 h-5" />
+            </button>
+          </div>
+          {previewMutation.isPending ? (
               <div className="flex items-center justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                 <span className="ml-3 text-sm text-gray-600">Generating preview...</span>
               </div>
-            ) : previewResult ? (
+          ) : previewResult ? (
               <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">{previewResult}</pre>
-              </div>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
+        </div>
         )}
       </div>
     </div>

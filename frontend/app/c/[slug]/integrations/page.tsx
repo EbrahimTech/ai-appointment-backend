@@ -225,7 +225,7 @@ export default function ClinicIntegrationsPage() {
             <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 text-white shadow-lg">
               <Plug className="w-7 h-7" />
             </div>
-            <div>
+          <div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">Integrations</h1>
               <p className="text-sm text-gray-600">Manage WhatsApp and Google Calendar connections</p>
             </div>
@@ -247,59 +247,59 @@ export default function ClinicIntegrationsPage() {
               </div>
             </div>
             <StatusBadge status={whatsapp?.status ?? "DOWN"} />
-          </div>
+        </div>
 
           <div className="grid gap-4 md:grid-cols-3 mb-6">
-            <InfoRow label="Provider" value={whatsapp?.provider} />
+          <InfoRow label="Provider" value={whatsapp?.provider} />
             <InfoRow label="Last Success" value={whatsapp?.last_success_at} />
             <InfoRow label="Last Error" value={whatsapp?.last_error_at} />
-          </div>
+        </div>
 
           <form className="space-y-4" onSubmit={handleSendTest}>
-            <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700" htmlFor="sandbox-phone">
                   Sandbox Phone
-                </label>
-                <input
-                  id="sandbox-phone"
-                  name="sandbox-phone"
-                  value={toPhone}
-                  onChange={(event) => setToPhone(event.target.value)}
-                  placeholder="+15555550123"
+              </label>
+              <input
+                id="sandbox-phone"
+                name="sandbox-phone"
+                value={toPhone}
+                onChange={(event) => setToPhone(event.target.value)}
+                placeholder="+15555550123"
                   className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  required
-                />
-              </div>
+                required
+              />
+            </div>
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700" htmlFor="template-key">
                   Template Key
-                </label>
-                <input
-                  id="template-key"
-                  name="template-key"
-                  value={templateKey}
-                  onChange={(event) => setTemplateKey(event.target.value)}
+              </label>
+              <input
+                id="template-key"
+                name="template-key"
+                value={templateKey}
+                onChange={(event) => setTemplateKey(event.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                />
-              </div>
+              />
             </div>
+          </div>
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700" htmlFor="variables">
-                Variables (JSON)
-              </label>
-              <textarea
-                id="variables"
-                name="variables"
-                rows={4}
-                value={variablesText}
-                onChange={(event) => setVariablesText(event.target.value)}
+              Variables (JSON)
+            </label>
+            <textarea
+              id="variables"
+              name="variables"
+              rows={4}
+              value={variablesText}
+              onChange={(event) => setVariablesText(event.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              />
+            />
               <p className="text-xs text-gray-500">
-                Example: {"{\"name\":\"Omar\",\"slot1\":\"10:00\",\"slot2\":\"14:00\"}"}
-              </p>
-            </div>
+              Example: {"{\"name\":\"Omar\",\"slot1\":\"10:00\",\"slot2\":\"14:00\"}"}
+            </p>
+          </div>
             {testError && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3">
                 <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
@@ -307,30 +307,30 @@ export default function ClinicIntegrationsPage() {
               </div>
             )}
             <div className="flex items-center gap-3">
-              <button
-                type="submit"
+            <button
+              type="submit"
                 className="flex items-center gap-2 rounded-lg bg-green-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm"
-                disabled={whatsappQuery.isPending}
-              >
+              disabled={whatsappQuery.isPending}
+            >
                 <Send className="w-4 h-4" />
                 <span>Send Test</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => whatsappQuery.refetch()}
+            </button>
+            <button
+              type="button"
+              onClick={() => whatsappQuery.refetch()}
                 className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
+            >
                 <RefreshCw className="w-4 h-4" />
                 <span>Refresh Status</span>
-              </button>
-            </div>
-          </form>
+            </button>
+          </div>
+        </form>
 
           {outboxId && (
             <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-5">
               <div className="flex items-center justify-between mb-4">
                 <span className="text-sm font-semibold text-gray-900">Outbox #{outboxId}</span>
-                <StatusPill state={outboxStatus?.state ?? (isPolling ? "QUEUED" : "QUEUED")} />
+              <StatusPill state={outboxStatus?.state ?? (isPolling ? "QUEUED" : "QUEUED")} />
               </div>
               <dl className="space-y-2">
                 <InfoRow label="Message Type" value={outboxStatus?.message_type ?? "session"} compact />
@@ -345,7 +345,7 @@ export default function ClinicIntegrationsPage() {
               )}
             </div>
           )}
-        </div>
+          </div>
 
         {/* Google Calendar Integration */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
@@ -354,34 +354,34 @@ export default function ClinicIntegrationsPage() {
               <div className="flex items-center justify-center w-12 h-12 rounded-lg bg-blue-100">
                 <Calendar className="w-6 h-6 text-blue-600" />
               </div>
-              <div>
+          <div>
                 <h2 className="text-xl font-semibold text-gray-900">Google Calendar</h2>
                 <p className="text-sm text-gray-600">Keep bookings synced with your Google Calendar</p>
               </div>
-            </div>
-            <StatusBadge status={google?.status ?? "DISCONNECTED"} />
           </div>
+          <StatusBadge status={google?.status ?? "DISCONNECTED"} />
+        </div>
           <div className="grid gap-4 md:grid-cols-2 mb-6">
             <InfoRow label="Last Auth" value={google?.last_auth_at} />
             <InfoRow label="Last Error" value={google?.last_error} />
-          </div>
+        </div>
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleConnectGoogle}
+          <button
+            type="button"
+            onClick={handleConnectGoogle}
               className="flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm"
-            >
+          >
               <Calendar className="w-4 h-4" />
               <span>Connect Google</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => googleQuery.refetch()}
+          </button>
+          <button
+            type="button"
+            onClick={() => googleQuery.refetch()}
               className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-            >
+          >
               <RefreshCw className="w-4 h-4" />
               <span>Refresh Status</span>
-            </button>
+          </button>
           </div>
         </div>
       </div>
