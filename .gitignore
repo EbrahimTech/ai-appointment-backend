@@ -68,6 +68,7 @@ yarn-error.log*
 pnpm-debug.log*
 .pnpm-debug.log*
 
+.next/
 frontend/.next/
 frontend/out/
 frontend/dist/
