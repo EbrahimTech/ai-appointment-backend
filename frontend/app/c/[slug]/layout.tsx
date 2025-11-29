@@ -17,6 +17,7 @@ import {
   Menu,
   X,
   CheckSquare,
+  Briefcase,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -40,8 +41,7 @@ export default function ClinicLayout({ children }: { children: ReactNode }) {
     { href: `/c/${slug}/conversations`, label: "Conversations", icon: MessageSquare },
     { href: `/c/${slug}/appointments`, label: "Appointments", icon: Calendar },
     { href: `/c/${slug}/templates`, label: "Templates", icon: FileText },
-    { href: `/c/${slug}/services`, label: "Services", icon: Settings },
-    { href: `/c/${slug}/hours`, label: "Hours", icon: Clock },
+    { href: `/c/${slug}/services`, label: "Services & Hours", icon: Briefcase },
     { href: `/c/${slug}/users`, label: "Users", icon: Users },
     { href: `/c/${slug}/integrations`, label: "Integrations", icon: Plug },
     { href: `/c/${slug}/knowledge`, label: "Knowledge Base", icon: BookOpen },
