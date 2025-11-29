@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupportSession } from "../../../providers";
-import { Settings, Save, AlertCircle, CheckCircle2, Globe, Phone, MapPin, Clock, Languages } from "lucide-react";
+import { Settings, Save, AlertCircle, CheckCircle2, Globe, Phone, MapPin, Clock, Languages, Mail } from "lucide-react";
 
 type ClinicInfo = {
   name: string;
@@ -14,6 +14,7 @@ type ClinicInfo = {
   address: string;
   tz: string;
   default_lang: string;
+  email: string;
 };
 
 export default function ClinicSettingsPage() {
@@ -88,6 +89,14 @@ export default function ClinicSettingsPage() {
     if (!formData.name?.trim()) {
       setErrorMessage("Clinic name is required");
       return;
+    }
+    if (formData.email && formData.email.trim()) {
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formData.email.trim())) {
+        setErrorMessage("Please enter a valid email address");
+        return;
+      }
     }
     updateMutation.mutate(formData);
   };
@@ -196,6 +205,28 @@ export default function ClinicSettingsPage() {
                   ) : (
                     <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900">
                       {clinicData?.name || "—"}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <div className="flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-gray-500" />
+                      Email Address
+                    </div>
+                  </label>
+                  {isEditing ? (
+                    <input
+                      type="email"
+                      value={clinicData?.email || ""}
+                      onChange={(e) => handleChange("email", e.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-colors"
+                      placeholder="your.email@example.com"
+                    />
+                  ) : (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900">
+                      {clinicData?.email || "—"}
                     </div>
                   )}
                 </div>

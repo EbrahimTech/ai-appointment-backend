@@ -2363,6 +2363,9 @@ class ClinicSettingsView(APIView):
     )
     def get(self, request, slug: str):
         clinic: Clinic = request.clinic
+        # Get current user's email from membership
+        membership = request.clinic_membership
+        user_email = membership.user.email if membership else request.user.email
         data = {
             "name": clinic.name,
             "slug": clinic.slug,
@@ -2371,6 +2374,7 @@ class ClinicSettingsView(APIView):
             "address": clinic.address or "",
             "tz": clinic.tz or "UTC",
             "default_lang": clinic.default_lang or "en",
+            "email": user_email or "",
         }
         return ok_response(data)
 
@@ -2390,6 +2394,7 @@ class ClinicSettingsView(APIView):
         address = payload.get("address", "").strip()
         tz = payload.get("tz", "").strip()
         default_lang = payload.get("default_lang", "").strip()
+        email = payload.get("email", "").strip().lower()
 
         if not name:
             return error_response("INVALID_NAME", status_code=400)
@@ -2397,6 +2402,39 @@ class ClinicSettingsView(APIView):
         valid_langs = {choice for choice, _label in LanguageChoices.choices}
         if default_lang and default_lang not in valid_langs:
             return error_response("INVALID_LANGUAGE", status_code=400)
+
+        # Update user email if provided
+        user_updated = False
+        if email:
+            try:
+                validate_email(email)
+            except ValidationError:
+                return error_response("INVALID_EMAIL", status_code=400)
+            
+            # Check if email is already taken by another user
+            existing_user = User.objects.filter(email__iexact=email).exclude(id=request.user.id).first()
+            if existing_user:
+                return error_response("EMAIL_ALREADY_EXISTS", status_code=400)
+            
+            # Update current user's email
+            if request.user.email.lower() != email:
+                old_email = request.user.email
+                request.user.email = email
+                request.user.username = email  # Update username to match email
+                request.user.save(update_fields=["email", "username", "updated_at"])
+                user_updated = True
+                
+                # Log email change
+                AuditLog.objects.create(
+                    actor_user=request.user,
+                    action="USER_EMAIL_UPDATE",
+                    scope=AuditLog.Scope.CLINIC,
+                    clinic=clinic,
+                    meta={
+                        "old_email": old_email,
+                        "new_email": email,
+                    },
+                )
 
         update_fields = []
         if clinic.name != name:
@@ -2422,6 +2460,10 @@ class ClinicSettingsView(APIView):
             update_fields.append("updated_at")
             clinic.save(update_fields=update_fields)
 
+        # Get updated email
+        membership = request.clinic_membership
+        user_email = membership.user.email if membership else request.user.email
+
         data = {
             "name": clinic.name,
             "slug": clinic.slug,
@@ -2430,6 +2472,7 @@ class ClinicSettingsView(APIView):
             "address": clinic.address or "",
             "tz": clinic.tz or "UTC",
             "default_lang": clinic.default_lang or "en",
+            "email": user_email or "",
         }
         return ok_response(data)
 
