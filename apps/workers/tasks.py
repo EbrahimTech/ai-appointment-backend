@@ -225,7 +225,7 @@ def dispatch_outbox_messages() -> int:
                 
                 # For now, mark as delivered immediately
                 # In production, delivery status should come from webhook
-                mark_outbox_delivered(message)
+            mark_outbox_delivered(message)
             else:
                 # Handle failure
                 raise Exception(result.error or "Unknown WhatsApp send error")
@@ -253,12 +253,12 @@ def dispatch_outbox_messages() -> int:
                 message.scheduled_for = timezone.now() + timedelta(seconds=backoff_seconds)
             else:
                 # Permanent failure or max attempts reached
-                message.status = (
-                    OutboxStatus.FAILED
+            message.status = (
+                OutboxStatus.FAILED
                         if should_retry
-                    else OutboxStatus.CANCELLED
-                )
-                backoff_seconds = min(OUTBOX_BACKOFF_MAX_SECONDS, 2 ** message.attempts)
+                else OutboxStatus.CANCELLED
+            )
+            backoff_seconds = min(OUTBOX_BACKOFF_MAX_SECONDS, 2 ** message.attempts)
                 message.scheduled_for = timezone.now() + timedelta(seconds=backoff_seconds)
             
             message.last_error = str(exc)

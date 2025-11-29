@@ -435,3 +435,581 @@ cd frontend && npm install && npm run dev
 - Google OAuth credentials (لـ Calendar)
 - WhatsApp credentials (أو استخدام test mode)
 
+---
+
+# 🚀 دليل النشر (Deployment Guide)
+
+## ✅ ما هو موجود وجاهز:
+
+### 1. **Backend Infrastructure**
+- ✅ `Dockerfile.prod` - جاهز للإنتاج
+- ✅ `docker-compose.prod.yml` - إعدادات الإنتاج
+- ✅ `gunicorn.conf.py` - إعدادات Gunicorn
+- ✅ `nginx.conf` - إعدادات Nginx مع SSL
+- ✅ PostgreSQL مع pgvector
+- ✅ Redis للـ Celery
+- ✅ Celery Worker & Beat
+
+### 2. **Frontend**
+- ✅ `Dockerfile.frontend` - جاهز للإنتاج
+- ✅ Next.js 14.1.0 مع standalone output
+- ✅ Production build scripts
+- ✅ API routes جاهزة
+- ✅ Middleware للـ authentication
+
+### 3. **Security**
+- ✅ HTTPS configuration في Nginx
+- ✅ Security headers
+- ✅ JWT authentication
+- ✅ httpOnly cookies
+- ✅ CORS settings
+
+### 4. **Health Checks**
+- ✅ `/health/` endpoint موجود
+- ✅ Health checks في Dockerfiles
+
+---
+
+## ⚠️ ما يحتاج إلى إعداد قبل النشر:
+
+### 1. **Environment Variables (.env)**
+
+#### Backend Variables:
+```env
+# Django Core
+DJANGO_SECRET_KEY=<generate-strong-secret-key>
+DJANGO_DEBUG=false
+DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
+
+# Database
+POSTGRES_DB=ai_appointment
+POSTGRES_USER=ai_user
+POSTGRES_PASSWORD=<strong-password>
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+
+# Redis
+REDIS_PASSWORD=<strong-password>
+CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
+
+# Security
+ENCRYPTION_KEY=<generate-strong-encryption-key>
+LEAD_WEBHOOK_SECRET=<generate-secret>
+
+# LLM (DeepSeek)
+DEEPSEEK_API_KEY=<your-deepseek-api-key>
+DEEPSEEK_API_BASE=https://api.deepseek.com
+
+# Google Calendar OAuth
+GOOGLE_CLIENT_ID=<your-google-client-id>
+GOOGLE_CLIENT_SECRET=<your-google-client-secret>
+GOOGLE_REDIRECT_URI=https://yourdomain.com/calendars/google/callback
+
+# WhatsApp
+WHATSAPP_DEFAULT_SENDER=<whatsapp-number>
+WHATSAPP_SESSION_FALLBACK_HSM_NAME=session_clarify
+
+# JWT
+JWT_ACCESS_LIFETIME_MINUTES=30
+JWT_REFRESH_LIFETIME_DAYS=7
+
+# Support Sessions
+SUPPORT_SESSION_MINUTES=60
+
+# Celery
+CELERY_SWEEP_TENTATIVE_SECONDS=600
+```
+
+#### Frontend Variables:
+```env
+NEXT_PUBLIC_BACKEND_URL=https://api.yourdomain.com
+NEXT_PUBLIC_DEFAULT_TZ=UTC
+```
+
+### 2. **SSL Certificates**
+- ⚠️ تحتاج إلى شهادات SSL في مجلد `ssl/`:
+  - `ssl/cert.pem`
+  - `ssl/key.pem`
+- أو استخدام Let's Encrypt مع Certbot
+
+### 3. **Domain & DNS**
+- ⚠️ تحتاج إلى:
+  - Domain name
+  - DNS records (A record)
+  - SSL certificate
+
+### 4. **Initial Data**
+- ⚠️ تحتاج إلى:
+  - إنشاء HQ staff account (SUPERADMIN)
+  - Seed data (اختياري)
+
+---
+
+## 🔧 خطوات النشر:
+
+### الخطوة 1: إعداد ملف .env
+```bash
+# إنشاء ملف .env في root directory
+# استخدم القائمة أعلاه لجميع المتغيرات المطلوبة
+```
+
+### الخطوة 2: إعداد SSL Certificates
+```bash
+# إنشاء مجلد ssl
+mkdir ssl
+
+# إضافة شهادات SSL
+# cert.pem و key.pem
+```
+
+### الخطوة 3: بناء الصور
+```bash
+# بناء جميع الصور
+docker-compose -f docker-compose.prod.yml build
+```
+
+### الخطوة 4: تشغيل الخدمات
+```bash
+# تشغيل جميع الخدمات
+docker-compose -f docker-compose.prod.yml up -d
+
+# التحقق من الحالة
+docker-compose -f docker-compose.prod.yml ps
+```
+
+### الخطوة 5: إعداد قاعدة البيانات
+```bash
+# Migrations تعمل تلقائياً عند بدء web service
+# للتحقق:
+docker-compose -f docker-compose.prod.yml exec web python manage.py migrate
+
+# إنشاء HQ staff account
+docker-compose -f docker-compose.prod.yml exec web python manage.py shell
+```
+
+```python
+from django.contrib.auth.models import User
+from apps.accounts.models import StaffAccount
+
+user = User.objects.create_user(
+    username="hq_admin",
+    email="admin@yourdomain.com",
+    password="strong-password-here",
+    is_active=True
+)
+
+StaffAccount.objects.create(
+    user=user,
+    role=StaffAccount.Role.SUPERADMIN
+)
+```
+
+### الخطوة 6: التحقق من النشر
+```bash
+# Health check
+curl https://yourdomain.com/health/
+
+# Frontend
+curl https://yourdomain.com/
+
+# Backend API
+curl https://yourdomain.com/api/health/
+```
+
+---
+
+## 📝 ملاحظات مهمة:
+
+1. **Security**: تأكد من تغيير جميع الـ secrets في production
+2. **Database**: استخدم PostgreSQL في production (ليس SQLite)
+3. **SSL**: HTTPS إلزامي في production
+4. **Backup**: ضع خطة backup منتظمة للـ database
+5. **Monitoring**: راقب الأداء والأخطاء
+6. **Updates**: خطط لـ updates وmaintenance windows
+
+---
+
+## 🔄 تحديث التطبيق:
+
+```bash
+# 1. سحب التحديثات
+git pull
+
+# 2. إعادة بناء الصور
+docker-compose -f docker-compose.prod.yml build
+
+# 3. إعادة تشغيل الخدمات
+docker-compose -f docker-compose.prod.yml up -d
+
+# 4. تشغيل migrations (إذا لزم الأمر)
+docker-compose -f docker-compose.prod.yml exec web python manage.py migrate
+```
+
+---
+
+## 🛑 إيقاف التطبيق:
+
+```bash
+# إيقاف جميع الخدمات
+docker-compose -f docker-compose.prod.yml down
+
+# إيقاف مع حذف volumes (احذر!)
+docker-compose -f docker-compose.prod.yml down -v
+```
+
+---
+
+## 📊 Services في Production:
+
+- `db` - PostgreSQL مع pgvector
+- `redis` - Redis للـ Celery
+- `web` - Django Backend (Gunicorn)
+- `worker` - Celery Worker
+- `beat` - Celery Beat
+- `frontend` - Next.js Frontend
+- `nginx` - Nginx Reverse Proxy
+
+---
+
+## ✅ Checklist قبل النشر:
+
+- [ ] ملف `.env` موجود مع جميع المتغيرات
+- [ ] SSL certificates موجودة في `ssl/`
+- [ ] Domain & DNS مُعدة
+- [ ] `DJANGO_DEBUG=false`
+- [ ] جميع secrets قوية ومختلفة عن development
+- [ ] `ALLOWED_HOSTS` يحتوي على domain الصحيح
+- [ ] HQ staff account تم إنشاؤه
+- [ ] Database migrations تمت
+- [ ] جميع services تعمل
+- [ ] Health checks تعمل
+- [ ] Frontend و Backend يتصلان بشكل صحيح
+
+---
+
+# 📋 خلاصة ما تبقى قبل النشر - مع شرح الحلول
+
+## ✅ ما تم إنجازه (جاهز 100%):
+
+1. ✅ **Dockerfiles** - `Dockerfile.prod` و `Dockerfile.frontend`
+2. ✅ **Docker Compose** - `docker-compose.prod.yml` جاهز
+3. ✅ **Nginx Configuration** - `nginx.conf` مع SSL و routing
+4. ✅ **Health Checks** - `/health/` endpoint موجود
+5. ✅ **Code** - جميع الكود جاهز ومختبر
+
+---
+
+## ⚠️ ما تبقى (4 نقاط فقط):
+
+### 1️⃣ إنشاء ملف `.env` مع جميع المتغيرات
+
+**الخطوات:**
+
+#### أ) إنشاء الملف:
+```bash
+# في root directory للمشروع
+touch .env
+# أو على Windows:
+type nul > .env
+```
+
+#### ب) إضافة المحتوى:
+افتح `.env` وأضف:
+
+```env
+# ============================================
+# Django Core Settings
+# ============================================
+DJANGO_SECRET_KEY=<generate-strong-secret>
+DJANGO_DEBUG=false
+DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
+
+# ============================================
+# Database (PostgreSQL)
+# ============================================
+POSTGRES_DB=ai_appointment
+POSTGRES_USER=ai_user
+POSTGRES_PASSWORD=<strong-password>
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+
+# ============================================
+# Redis
+# ============================================
+REDIS_PASSWORD=<strong-password>
+CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
+
+# ============================================
+# Security
+# ============================================
+ENCRYPTION_KEY=<generate-strong-key>
+LEAD_WEBHOOK_SECRET=<generate-secret>
+
+# ============================================
+# LLM (DeepSeek) - اختياري
+# ============================================
+DEEPSEEK_API_KEY=your-deepseek-api-key
+DEEPSEEK_API_BASE=https://api.deepseek.com
+
+# ============================================
+# Google Calendar OAuth - اختياري
+# ============================================
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=https://yourdomain.com/calendars/google/callback
+
+# ============================================
+# WhatsApp - اختياري
+# ============================================
+WHATSAPP_DEFAULT_SENDER=+1234567890
+WHATSAPP_SESSION_FALLBACK_HSM_NAME=session_clarify
+
+# ============================================
+# JWT Settings
+# ============================================
+JWT_ACCESS_LIFETIME_MINUTES=30
+JWT_REFRESH_LIFETIME_DAYS=7
+
+# ============================================
+# Support Sessions
+# ============================================
+SUPPORT_SESSION_MINUTES=60
+
+# ============================================
+# Celery Settings
+# ============================================
+CELERY_SWEEP_TENTATIVE_SECONDS=600
+
+# ============================================
+# Frontend (Next.js)
+# ============================================
+NEXT_PUBLIC_BACKEND_URL=https://yourdomain.com
+NEXT_PUBLIC_DEFAULT_TZ=UTC
+
+# ============================================
+# CORS (if needed)
+# ============================================
+CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+```
+
+#### ج) توليد Secrets القوية:
+
+**لـ DJANGO_SECRET_KEY:**
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(50))"
+```
+
+**لـ ENCRYPTION_KEY:**
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+**لـ LEAD_WEBHOOK_SECRET:**
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+**لـ POSTGRES_PASSWORD و REDIS_PASSWORD:**
+استخدم كلمات مرور قوية (16+ حرف، أرقام، رموز)
+
+---
+
+### 2️⃣ إعداد SSL Certificates
+
+**الخيار الأول: Let's Encrypt (مجاني - موصى به)**
+
+```bash
+# 1. تثبيت Certbot
+sudo apt-get update
+sudo apt-get install certbot
+
+# 2. الحصول على شهادة
+sudo certbot certonly --standalone -d yourdomain.com -d www.yourdomain.com
+
+# 3. نسخ الشهادات إلى مجلد ssl
+mkdir -p ssl
+sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ssl/cert.pem
+sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ssl/key.pem
+sudo chmod 644 ssl/cert.pem
+sudo chmod 600 ssl/key.pem
+```
+
+**الخيار الثاني: Self-Signed (للاختبار فقط - لا تستخدم في production)**
+
+```bash
+mkdir -p ssl
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout ssl/key.pem \
+  -out ssl/cert.pem \
+  -subj "/C=US/ST=State/L=City/O=Organization/CN=yourdomain.com"
+```
+
+---
+
+### 3️⃣ إعداد Domain & DNS
+
+**الخطوات:**
+
+1. **شراء Domain** من أي مزود (Namecheap, GoDaddy, Cloudflare, etc.)
+
+2. **إعداد DNS Records:**
+   - **A Record:**
+     ```
+     Type: A
+     Name: @ (أو yourdomain.com)
+     Value: <IP-address-of-your-server>
+     TTL: 3600
+     ```
+   - **A Record للـ www:**
+     ```
+     Type: A
+     Name: www
+     Value: <IP-address-of-your-server>
+     TTL: 3600
+     ```
+
+3. **الحصول على IP Server:**
+   ```bash
+   curl ifconfig.me
+   ```
+
+4. **الانتظار:** DNS propagation قد يستغرق 24-48 ساعة
+
+---
+
+### 4️⃣ إنشاء HQ Staff Account (بعد النشر)
+
+**الخطوات:**
+
+#### أ) بعد تشغيل الخدمات:
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+#### ب) إنشاء المستخدم (سطر واحد):
+```bash
+docker-compose -f docker-compose.prod.yml exec web python manage.py shell -c "
+from django.contrib.auth.models import User
+from apps.accounts.models import StaffAccount
+user = User.objects.create_user(
+    username='hq_admin',
+    email='admin@yourdomain.com',
+    password='YourStrongPassword123!',
+    is_active=True
+)
+StaffAccount.objects.create(user=user, role=StaffAccount.Role.SUPERADMIN)
+print('✅ HQ user created: admin@yourdomain.com')
+"
+```
+
+---
+
+## 🚀 خطوات النشر الكاملة (بترتيب):
+
+1. **إعداد Server:**
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y docker.io docker-compose git
+   sudo systemctl start docker
+   sudo systemctl enable docker
+   ```
+
+2. **رفع الكود:**
+   ```bash
+   git clone <your-repo-url>
+   cd ai-appointment-backend
+   ```
+
+3. **إنشاء ملف .env** (انظر الخطوة 1 أعلاه)
+
+4. **إعداد SSL** (انظر الخطوة 2 أعلاه)
+
+5. **بناء الصور:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml build
+   ```
+
+6. **تشغيل الخدمات:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml up -d
+   ```
+
+7. **التحقق من الحالة:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml ps
+   ```
+
+8. **إنشاء HQ Account** (انظر الخطوة 4 أعلاه)
+
+9. **اختبار النشر:**
+   ```bash
+   curl https://yourdomain.com/health/
+   ```
+
+---
+
+## 🔧 حل المشاكل الشائعة:
+
+### المشكلة: Nginx لا يبدأ
+**الحل:**
+```bash
+# تحقق من SSL certificates
+ls -la ssl/
+# يجب أن ترى cert.pem و key.pem
+
+# تحقق من nginx.conf
+docker-compose -f docker-compose.prod.yml exec nginx nginx -t
+```
+
+### المشكلة: Database connection error
+**الحل:**
+```bash
+# تحقق من PostgreSQL
+docker-compose -f docker-compose.prod.yml logs db
+
+# تحقق من .env - POSTGRES_PASSWORD يجب أن يكون صحيح
+```
+
+### المشكلة: Frontend لا يتصل بالBackend
+**الحل:**
+```bash
+# تحقق من NEXT_PUBLIC_BACKEND_URL في .env
+# يجب أن يكون: https://yourdomain.com
+```
+
+### المشكلة: SSL certificate expired
+**الحل:**
+```bash
+# تجديد Let's Encrypt
+sudo certbot renew
+sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ssl/cert.pem
+sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ssl/key.pem
+docker-compose -f docker-compose.prod.yml restart nginx
+```
+
+---
+
+## 🎯 الخلاصة النهائية:
+
+**ما تبقى (4 نقاط فقط):**
+1. ✅ إنشاء `.env` (5 دقائق)
+2. ✅ إعداد SSL (10-15 دقيقة)
+3. ✅ إعداد Domain & DNS (يعتمد على المزود)
+4. ✅ إنشاء HQ account (2 دقيقة بعد النشر)
+
+**الوقت الإجمالي:** ~30 دقيقة (باستثناء DNS propagation)
+
+**كل شيء آخر جاهز! 🚀**
+
+---
+
+## 📝 ملاحظات مهمة:
+
+1. **Security**: لا تشارك ملف `.env` أبداً
+2. **Backup**: ضع خطة backup للـ database
+3. **Monitoring**: راقب logs بانتظام
+4. **Updates**: خطط لـ updates منتظمة
+5. **SSL Renewal**: Let's Encrypt يحتاج تجديد كل 90 يوم
+

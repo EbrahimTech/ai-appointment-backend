@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -18,8 +18,9 @@ import {
   X,
   CheckSquare,
   Briefcase,
+  ArrowLeft,
+  Building2,
 } from "lucide-react";
-import { useState } from "react";
 
 type NavItem = {
   href: string;
@@ -34,6 +35,26 @@ export default function ClinicLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const slug = params.slug;
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isHQStaff, setIsHQStaff] = useState(false);
+
+  // Check if user is HQ staff
+  useEffect(() => {
+    const checkHQRole = async () => {
+      try {
+        const response = await fetch("/api/session/me");
+        if (response.ok) {
+          const data = await response.json();
+          const hqRole = data?.data?.hq_role;
+          if (hqRole === "SUPERADMIN" || hqRole === "OPS") {
+            setIsHQStaff(true);
+          }
+        }
+      } catch (error) {
+        // Ignore errors
+      }
+    };
+    checkHQRole();
+  }, []);
 
   const navItems: NavItem[] = [
     { href: `/c/${slug}/dashboard`, label: "Dashboard", icon: LayoutDashboard },
@@ -153,6 +174,16 @@ export default function ClinicLayout({ children }: { children: ReactNode }) {
             <Menu className="w-6 h-6" />
           </button>
           <div className="flex-1" />
+          {isHQStaff && (
+            <Link
+              href="/hq"
+              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors font-medium"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <Building2 className="w-4 h-4" />
+              <span>Back to HQ Portal</span>
+            </Link>
+          )}
         </header>
 
         {/* Page content */}

@@ -43,6 +43,8 @@ services:
       context: .
       dockerfile: Dockerfile.prod
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       DJANGO_DEBUG: "false"
       POSTGRES_HOST: db
@@ -50,9 +52,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      # Add all other environment variables from .env
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:
       db:
         condition: service_healthy
@@ -69,6 +70,8 @@ services:
       context: .
       dockerfile: Dockerfile.prod
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       DJANGO_DEBUG: "false"
       POSTGRES_HOST: db
@@ -76,8 +79,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/0
     command: celery -A backend worker -l info --concurrency=4
     depends_on:
       - web
@@ -90,6 +93,8 @@ services:
       context: .
       dockerfile: Dockerfile.prod
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       DJANGO_DEBUG: "false"
       POSTGRES_HOST: db
@@ -97,12 +102,25 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/0
     command: celery -A backend beat -l info
     depends_on:
       - web
       - redis
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8000}
+      NODE_ENV: production
+    depends_on:
+      - web
     networks:
       - app-network
 
@@ -118,6 +136,7 @@ services:
       - ./ssl:/etc/nginx/ssl:ro
     depends_on:
       - web
+      - frontend
     networks:
       - app-network
 
