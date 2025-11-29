@@ -2348,3 +2348,89 @@ class ClinicSetupStatusView(APIView):
         return ok_response(data)
 
 
+class ClinicSettingsView(APIView):
+    """Get and update clinic basic information."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+            ClinicMembership.Role.VIEWER,
+        ]
+    )
+    def get(self, request, slug: str):
+        clinic: Clinic = request.clinic
+        data = {
+            "name": clinic.name,
+            "slug": clinic.slug,
+            "phone_number": clinic.phone_number or "",
+            "whatsapp_number": clinic.whatsapp_number or "",
+            "address": clinic.address or "",
+            "tz": clinic.tz or "UTC",
+            "default_lang": clinic.default_lang or "en",
+        }
+        return ok_response(data)
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def put(self, request, slug: str):
+        clinic: Clinic = request.clinic
+        payload = request.data or {}
+
+        name = payload.get("name", "").strip()
+        phone_number = payload.get("phone_number", "").strip()
+        whatsapp_number = payload.get("whatsapp_number", "").strip()
+        address = payload.get("address", "").strip()
+        tz = payload.get("tz", "").strip()
+        default_lang = payload.get("default_lang", "").strip()
+
+        if not name:
+            return error_response("INVALID_NAME", status_code=400)
+
+        valid_langs = {choice for choice, _label in LanguageChoices.choices}
+        if default_lang and default_lang not in valid_langs:
+            return error_response("INVALID_LANGUAGE", status_code=400)
+
+        update_fields = []
+        if clinic.name != name:
+            clinic.name = name
+            update_fields.append("name")
+        if phone_number is not None and clinic.phone_number != phone_number:
+            clinic.phone_number = phone_number
+            update_fields.append("phone_number")
+        if whatsapp_number is not None and clinic.whatsapp_number != whatsapp_number:
+            clinic.whatsapp_number = whatsapp_number
+            update_fields.append("whatsapp_number")
+        if address is not None and clinic.address != address:
+            clinic.address = address
+            update_fields.append("address")
+        if tz and clinic.tz != tz:
+            clinic.tz = tz
+            update_fields.append("tz")
+        if default_lang and clinic.default_lang != default_lang:
+            clinic.default_lang = default_lang
+            update_fields.append("default_lang")
+
+        if update_fields:
+            update_fields.append("updated_at")
+            clinic.save(update_fields=update_fields)
+
+        data = {
+            "name": clinic.name,
+            "slug": clinic.slug,
+            "phone_number": clinic.phone_number or "",
+            "whatsapp_number": clinic.whatsapp_number or "",
+            "address": clinic.address or "",
+            "tz": clinic.tz or "UTC",
+            "default_lang": clinic.default_lang or "en",
+        }
+        return ok_response(data)
+
+
