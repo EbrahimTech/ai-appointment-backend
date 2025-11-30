@@ -1122,9 +1122,219 @@ bash scripts/backup_db.sh backups/my_backup.sql
 - `make prod-shell` - Django shell في production
 - `make prod-migrate` - تشغيل migrations في production
 
+#### Local Testing (Full Stack):
+- `make local-build` - بناء الصور للتجربة المحلية
+- `make local-up` - تشغيل الخدمات للتجربة المحلية
+- `make local-down` - إيقاف الخدمات
+- `make local-logs` - عرض logs
+- `make local-shell` - Django shell
+- `make local-migrate` - تشغيل migrations
+- `make local-create-user` - إنشاء HQ user
+
 #### Utilities:
 - `make health` - فحص صحة الخدمات
 - `make backup` - نسخ احتياطي
 - `make create-hq-user` - إنشاء HQ user
 - `make generate-secrets` - توليد secrets
+
+---
+
+# 🧪 دليل التجربة المتكاملة - قبل النشر
+
+## ⚡ بدء سريع
+
+### 1. إنشاء ملف .env
+```powershell
+# على Windows
+Copy-Item env.example .env
+```
+
+### 2. بناء وتشغيل
+```bash
+make local-build
+make local-up
+```
+
+### 3. إنشاء مستخدم HQ
+```bash
+make local-create-user
+```
+
+### 4. اختبار
+- افتح: `http://localhost:3000/login`
+- سجل دخول: `admin@test.com` / `Admin123!`
+
+---
+
+## 📋 دليل التجربة المتكاملة الكامل
+
+### الخطوة 1: إعداد ملف .env
+
+افتح ملف `.env` وعدّل القيم التالية:
+
+```env
+# Django
+DJANGO_SECRET_KEY=<generate-strong-secret>
+DJANGO_DEBUG=false
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+
+# Database
+POSTGRES_DB=ai_appointment
+POSTGRES_USER=ai_user
+POSTGRES_PASSWORD=<strong-password>
+
+# Redis
+REDIS_PASSWORD=<strong-password>
+
+# Security
+ENCRYPTION_KEY=<generate-strong-key>
+LEAD_WEBHOOK_SECRET=<generate-secret>
+
+# Frontend
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+
+# CORS
+CORS_ALLOWED_ORIGINS=http://localhost:3000
+
+# SSL (false للتجربة المحلية)
+SECURE_SSL_REDIRECT=false
+```
+
+### الخطوة 2: بناء الصور
+
+```bash
+make local-build
+# أو
+docker-compose -f docker-compose.local.yml build
+```
+
+### الخطوة 3: تشغيل الخدمات
+
+```bash
+make local-up
+# أو
+docker-compose -f docker-compose.local.yml up -d
+```
+
+**الخدمات التي ستعمل:**
+- ✅ `db` - PostgreSQL Database
+- ✅ `redis` - Redis Cache
+- ✅ `web` - Django Backend
+- ✅ `worker` - Celery Worker
+- ✅ `beat` - Celery Beat
+- ✅ `frontend` - Next.js Frontend
+- ✅ `nginx` - Nginx Reverse Proxy
+
+### الخطوة 4: إنشاء HQ User
+
+```bash
+make local-create-user
+# أو
+bash scripts/create_hq_user_local.sh admin@test.com Admin123! SUPERADMIN
+```
+
+### الخطوة 5: اختبار الوظائف
+
+#### 5.1 اختبار تسجيل الدخول
+1. افتح: `http://localhost:3000/login`
+2. سجل دخول بـ: `admin@test.com` / `Admin123!`
+
+#### 5.2 اختبار HQ Portal
+- ✅ عرض قائمة العيادات
+- ✅ إنشاء عيادة جديدة
+- ✅ عرض تفاصيل عيادة
+
+#### 5.3 اختبار Clinic Portal
+1. من HQ Portal، انقر على عيادة
+2. يجب أن ترى:
+   - ✅ Dashboard
+   - ✅ Settings (تعديل البيانات)
+   - ✅ Services & Hours
+   - ✅ Messages
+   - ✅ Appointments
+   - ✅ "Back to HQ Portal" button (للـ HQ staff فقط)
+
+### الخطوة 6: فحص الصحة
+
+```bash
+# فحص Health
+curl http://localhost:8000/health/
+
+# أو
+bash scripts/check_health_local.sh
+```
+
+### الخطوة 7: عرض Logs
+
+```bash
+make local-logs
+# أو لخدمة محددة:
+docker-compose -f docker-compose.local.yml logs -f web
+```
+
+### الخطوة 8: إيقاف
+
+```bash
+make local-down
+# أو
+docker-compose -f docker-compose.local.yml down
+```
+
+---
+
+## 🔒 مراجعة الأمان
+
+### ✅ Security Headers
+- ✅ **Django Settings**: جميع security headers موجودة وصحيحة
+- ✅ **Nginx Configuration**: Security headers موجودة
+
+### ✅ HTTPS/SSL
+- ✅ **SSL Configuration**: صحيح في Nginx
+- ✅ **Django SSL Settings**: صحيح
+
+### ✅ Secrets Management
+- ✅ **Environment Variables**: جميع secrets في `.env`
+- ⚠️ **ملاحظة**: يجب تغيير جميع secrets في production
+
+### ✅ Authentication & Authorization
+- ✅ **JWT Authentication**: مستخدم بشكل صحيح
+- ✅ **httpOnly Cookies**: مستخدمة في Frontend
+- ✅ **Role-Based Access Control**: موجود في Backend
+
+### ✅ Error Handling
+- ✅ **Backend**: standardized responses
+- ✅ **Frontend**: error handling شامل
+
+---
+
+## 📋 Checklist التجربة المتكاملة
+
+### Infrastructure ✅
+- [ ] جميع الخدمات تعمل
+- [ ] Database متصل
+- [ ] Redis متصل
+- [ ] Celery Worker يعمل
+- [ ] Celery Beat يعمل
+
+### Backend ✅
+- [ ] Health endpoint يعمل
+- [ ] تسجيل الدخول يعمل
+- [ ] JWT tokens تعمل
+- [ ] API endpoints تستجيب
+
+### Frontend ✅
+- [ ] Frontend يعمل
+- [ ] تسجيل الدخول يعمل
+- [ ] HQ Portal يعمل
+- [ ] Clinic Portal يعمل
+- [ ] Navigation يعمل
+- [ ] Settings page يعمل
+
+### Functionality ✅
+- [ ] إنشاء HQ user يعمل
+- [ ] عرض العيادات يعمل
+- [ ] إنشاء عيادة جديدة يعمل
+- [ ] تعديل Settings يعمل
+- [ ] تعديل Email يعمل
+- [ ] "Back to HQ Portal" button يظهر للـ HQ staff فقط
 

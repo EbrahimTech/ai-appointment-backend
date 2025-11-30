@@ -1,5 +1,6 @@
 .PHONY: dev-up dev-down dev-shell migrate seed test beat-up beat-down
 .PHONY: prod-build prod-up prod-down prod-logs prod-shell
+.PHONY: local-build local-up local-down local-logs local-shell local-migrate local-create-user
 .PHONY: health backup create-hq-user generate-secrets
 
 # Development commands
@@ -45,6 +46,28 @@ prod-shell:
 
 prod-migrate:
 	docker-compose -f docker-compose.prod.yml exec web python manage.py migrate --noinput
+
+# Local testing commands (full stack test before deployment)
+local-build:
+	docker-compose -f docker-compose.local.yml build
+
+local-up:
+	docker-compose -f docker-compose.local.yml up -d
+
+local-down:
+	docker-compose -f docker-compose.local.yml down
+
+local-logs:
+	docker-compose -f docker-compose.local.yml logs -f
+
+local-shell:
+	docker-compose -f docker-compose.local.yml exec web bash
+
+local-migrate:
+	docker-compose -f docker-compose.local.yml exec web python manage.py migrate --noinput
+
+local-create-user:
+	@bash scripts/create_hq_user_local.sh
 
 # Utility commands
 health:
