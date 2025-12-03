@@ -1,1340 +1,346 @@
-# دليل تشغيل المشروع للاختبار
+# 📘 دليل المشروع الشامل
 
 ## 📋 نظرة عامة
 
-هذا الدليل يوضح كيفية تشغيل المشروع بشكل كامل للاختبار، بما في ذلك:
-- Backend (Django)
-- Frontend (Next.js)
-- Database (PostgreSQL)
-- Redis
-- Celery Worker & Beat
+هذا الدليل الوحيد للمشروع يحتوي على:
+- ✅ الإعدادات الحالية (ما تم إنجازه)
+- ⚠️ ما يحتاج إلى إعداد
+- 🚀 خطوات البدء في التجربة الحقيقية
+- 🔧 أوامر مفيدة
 
 ---
 
-## 🚀 الطريقة الأولى: Docker Compose (الأسهل)
+## ✅ ما تم إعداده في `.env`
 
-### المتطلبات
-- Docker Desktop مثبت ومشغل
-- Git Bash (لأوامر make على Windows)
+### 1. Environment Variables الأساسية
+- ✅ `DJANGO_SECRET_KEY` - معرّف
+- ✅ `POSTGRES_DB` - معرّف
+- ✅ `POSTGRES_USER` - معرّف
+- ✅ `POSTGRES_PASSWORD` - معرّف
+- ✅ `REDIS_PASSWORD` - معرّف
+- ✅ `ENCRYPTION_KEY` - معرّف
 
-### الخطوات
+### 2. DeepSeek AI ✅
+- ✅ `DEEPSEEK_API_KEY` - معرّف
+- ✅ `DEEPSEEK_API_BASE` - https://api.deepseek.com
+- **الحالة:** جاهز للرد التلقائي على رسائل WhatsApp
 
-#### 1. إعداد ملف البيئة
+### 3. Google Calendar OAuth ✅
+- ✅ `GOOGLE_CLIENT_ID` - معرّف
+- ✅ `GOOGLE_CLIENT_SECRET` - معرّف
+- ✅ `GOOGLE_REDIRECT_URI` - معرّف
+- **الحالة:** جاهز لربط Google Calendar لكل عيادة
 
+### 4. WhatsApp Cloud API (Meta) ✅
+- ✅ WhatsApp Cloud API من Meta - جاهز
+- ✅ `WHATSAPP_DEFAULT_SENDER` - معرّف (إن كان موجود)
+- **الحالة:** جاهز لإضافة WhatsApp Channel لكل عيادة
+
+---
+
+## ⚠️ ما يحتاج إلى إعداد لكل عيادة
+
+### 1️⃣ WhatsApp Channel (Meta Cloud API)
+
+**التحقق:**
 ```bash
-# إنشاء ملف .env من القيم الافتراضية
-# يمكنك نسخ هذا الملف وتعديله حسب الحاجة
+docker-compose exec web python manage.py shell -c "
+from apps.channels.models import ChannelAccount, ChannelType
+from apps.clinics.models import Clinic
+
+clinics = Clinic.objects.all()
+for clinic in clinics:
+    account = ChannelAccount.objects.filter(
+        clinic=clinic,
+        channel=ChannelType.WHATSAPP
+    ).first()
+    if account:
+        metadata = account.metadata or {}
+        phone_id = metadata.get('phone_number_id', 'N/A')
+        provider = account.provider_name
+        print(f'✅ {clinic.name}: WhatsApp متصل ({provider}) - Phone ID: {phone_id}')
+    else:
+        print(f'❌ {clinic.name}: WhatsApp غير متصل')
+"
 ```
 
-**ملف `.env` أساسي للاختبار:**
+**كيفية الإضافة:**
+1. سجل دخول إلى Clinic Portal: `/c/[slug]/integrations`
+2. اضغط "Add WhatsApp Channel"
+3. اختر Provider: **Meta** أو **Facebook**
+4. أدخل:
+   - **Phone Number ID**: من Meta Business Manager
+   - **Access Token**: من Meta Business Manager
+5. احفظ
 
-```env
-# Django
-DJANGO_SECRET_KEY=test-secret-key-change-in-production
-DJANGO_DEBUG=true
-DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+**ملاحظات:**
+- كل عيادة تحتاج **Phone Number ID خاص** بها
+- يمكن استخدام نفس Access Token لعدة عيادات إذا كانت من نفس Meta App
+- Phone Number ID موجود في: Meta Business Manager → WhatsApp → Phone Numbers
+- Access Token موجود في: Meta Business Manager → WhatsApp → API Setup
 
-# Database
-POSTGRES_DB=ai_appointment
-POSTGRES_USER=ai_user
-POSTGRES_PASSWORD=change-me
+---
 
-# Redis
-CELERY_BROKER_URL=redis://redis:6379/0
-CELERY_RESULT_BACKEND=redis://redis:6379/0
+### 2️⃣ Google Calendar
 
-# DeepSeek LLM (اختياري للاختبار)
-DEEPSEEK_API_KEY=your-api-key-here
+**التحقق:**
+```bash
+docker-compose exec web python manage.py shell -c "
+from apps.calendars.models import GoogleCredential
+from apps.clinics.models import Clinic
 
-# Google Calendar (اختياري للاختبار)
-GOOGLE_CLIENT_ID=your-client-id
-GOOGLE_CLIENT_SECRET=your-client-secret
-
-# WhatsApp (اختياري - يمكن استخدام test mode)
-WHATSAPP_TEST_MODE=true
-
-# Frontend (يجب أن يكون نفس URL الذي يعمل عليه Backend)
-NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+clinics = Clinic.objects.all()
+for clinic in clinics:
+    cred = GoogleCredential.objects.filter(clinic=clinic).first()
+    if cred:
+        print(f'✅ {clinic.name}: Google Calendar متصل ({cred.account_email})')
+    else:
+        print(f'❌ {clinic.name}: Google Calendar غير متصل')
+"
 ```
 
-#### 2. تشغيل Backend Services
+**كيفية الإضافة:**
+1. سجل دخول إلى Clinic Portal: `/c/[slug]/integrations`
+2. اضغط "Connect Google Calendar"
+3. سجل دخول بحساب Google
+4. وافق على الصلاحيات
 
+**ملاحظات:**
+- يمكن استخدام نفس حساب Google لعدة عيادات
+- أو حساب Google خاص لكل عيادة
+
+---
+
+### 3️⃣ Services و Operating Hours
+
+**التحقق:**
 ```bash
-# تشغيل جميع الخدمات (DB, Redis, Web, Worker, Beat)
-make dev-up
+docker-compose exec web python manage.py shell -c "
+from apps.clinics.models import Clinic
+from apps.services.models import ServiceHours
 
-# أو مباشرة:
+clinics = Clinic.objects.all()
+for clinic in clinics:
+    services_count = clinic.services.filter(is_active=True).count()
+    hours_count = ServiceHours.objects.filter(service__clinic=clinic).count()
+    print(f'{clinic.name}: Services={services_count}, Hours={hours_count}')
+"
+```
+
+**كيفية الإضافة:**
+1. سجل دخول إلى Clinic Portal: `/c/[slug]/services`
+2. اضغط "Add Service"
+3. أضف Services (مثال: Cleaning, Checkup, Consultation)
+4. حدد Operating Hours لكل Service
+
+---
+
+### 4️⃣ Message Templates
+
+**التحقق:**
+```bash
+docker-compose exec web python manage.py shell -c "
+from apps.channels.models import HSMTemplate, HSMTemplateStatus
+from apps.clinics.models import Clinic
+
+clinics = Clinic.objects.all()
+for clinic in clinics:
+    templates_count = HSMTemplate.objects.filter(
+        clinic=clinic,
+        status=HSMTemplateStatus.APPROVED
+    ).count()
+    print(f'{clinic.name}: {templates_count} قوالب معتمدة')
+"
+```
+
+**كيفية الإضافة:**
+1. سجل دخول إلى Clinic Portal: `/c/[slug]/templates`
+2. اضغط "Add Template"
+3. أنشئ قوالب مثل:
+   - `greet`: رسالة الترحيب
+   - `confirm`: تأكيد الموعد
+   - `remind`: تذكير بالموعد
+   - `cancel`: إلغاء الموعد
+
+---
+
+## 🚀 خطوات البدء في التجربة الحقيقية
+
+### الخطوة 1: التحقق من الإعدادات
+```bash
+docker-compose exec web python manage.py check_setup
+```
+
+### الخطوة 2: التحقق من العيادات
+```bash
+docker-compose exec web python manage.py shell -c "
+from apps.clinics.models import Clinic
+clinics = Clinic.objects.all()
+print(f'عدد العيادات: {clinics.count()}')
+for clinic in clinics:
+    print(f'  - {clinic.name} ({clinic.slug})')
+"
+```
+
+### الخطوة 3: إعداد عيادة (إن لم تكن موجودة)
+1. سجل دخول كـ HQ Admin: `/hq`
+2. اضغط "New Tenant"
+3. املأ بيانات العيادة
+4. احفظ
+
+### الخطوة 4: إعداد العيادة الكامل
+1. سجل دخول كـ Clinic Owner: `/c/[slug]`
+2. اذهب إلى `/c/[slug]/onboarding`
+3. اكمل Setup Checklist:
+   - ✅ أضف Services
+   - ✅ حدد Operating Hours
+   - ✅ أضف WhatsApp Channel (Meta Cloud API)
+   - ✅ اربط Google Calendar
+   - ✅ أضف Message Templates
+
+---
+
+## 🧪 اختبار التجربة الحقيقية
+
+### 1. اختبار WhatsApp
+1. أرسل رسالة WhatsApp إلى رقم العيادة (Phone Number ID)
+2. تحقق من استقبال الرسالة في النظام
+3. تحقق من الرد التلقائي من AI (DeepSeek)
+4. اختبر إنشاء موعد من المحادثة
+
+### 2. اختبار Google Calendar
+1. أنشئ موعد من WhatsApp
+2. تحقق من ظهوره في Google Calendar
+3. اختبر التعديل والإلغاء
+
+### 3. اختبار AI (DeepSeek)
+1. أرسل رسالة معقدة
+2. تحقق من فهم AI للرسالة
+3. تحقق من الرد المناسب
+
+---
+
+## 🔧 أوامر مفيدة
+
+### التحقق الشامل من الإعدادات:
+```bash
+docker-compose exec web python manage.py check_setup
+```
+
+### التحقق من عيادة معينة:
+```bash
+docker-compose exec web python manage.py shell -c "
+from apps.clinics.models import Clinic
+from apps.channels.models import ChannelAccount, ChannelType
+from apps.calendars.models import GoogleCredential
+
+clinic = Clinic.objects.get(slug='your-clinic-slug')
+print(f'Clinic: {clinic.name}')
+
+# WhatsApp
+whatsapp = ChannelAccount.objects.filter(clinic=clinic, channel=ChannelType.WHATSAPP).first()
+if whatsapp:
+    metadata = whatsapp.metadata or {}
+    print(f'WhatsApp: ✅ ({whatsapp.provider_name}) - Phone ID: {metadata.get(\"phone_number_id\", \"N/A\")}')
+else:
+    print('WhatsApp: ❌')
+
+# Google Calendar
+google = GoogleCredential.objects.filter(clinic=clinic).first()
+if google:
+    print(f'Google Calendar: ✅ ({google.account_email})')
+else:
+    print('Google Calendar: ❌')
+"
+```
+
+### إعادة تشغيل الخدمات:
+```bash
+docker-compose restart web worker
+```
+
+### تشغيل المشروع:
+```bash
 docker-compose up -d
 ```
 
-**التحقق من الحالة:**
+### إيقاف المشروع:
 ```bash
-docker-compose ps
-```
-
-يجب أن ترى:
-- `db` - PostgreSQL
-- `redis` - Redis
-- `web` - Django server
-- `worker` - Celery worker
-- `beat` - Celery beat
-
-#### 3. إعداد قاعدة البيانات
-
-```bash
-# تشغيل migrations
-make migrate
-
-# أو مباشرة:
-docker-compose exec web python manage.py migrate
-
-# إضافة بيانات تجريبية
-make seed
-
-# أو مباشرة:
-docker-compose exec web python manage.py seed_data
-```
-
-#### 4. إنشاء مستخدم HQ للاختبار (اختياري)
-
-**✅ ملاحظة مهمة**: `seed_data` command ينشئ تلقائياً مستخدم HQ:
-- **Email**: `admin@example.com`
-- **Password**: `Admin!234`
-- **Role**: `SUPERADMIN`
-
-يمكنك استخدام هذا المستخدم مباشرة بعد `make seed`!
-
-**إذا أردت إنشاء مستخدم إضافي:**
-
-```bash
-# الدخول إلى shell
-make dev-shell
-
-# أو مباشرة:
-docker-compose exec web bash
-
-# داخل shell:
-python manage.py shell
-```
-
-```python
-from django.contrib.auth.models import User
-from apps.accounts.models import StaffAccount
-
-# إنشاء مستخدم HQ
-user = User.objects.create_user(
-    username="hq_admin",
-    email="hq@example.com",
-    password="test123456",
-    is_active=True
-)
-
-# إضافة StaffAccount
-StaffAccount.objects.create(
-    user=user,
-    role=StaffAccount.Role.SUPERADMIN
-)
-
-print("✅ HQ user created: hq@example.com / test123456")
-```
-
-**أو سطر واحد:**
-
-```bash
-docker-compose exec web python manage.py shell -c "
-from django.contrib.auth.models import User
-from apps.accounts.models import StaffAccount
-user, created = User.objects.get_or_create(email='hq@example.com', defaults={'username': 'hq_admin', 'is_active': True})
-if created:
-    user.set_password('test123456')
-    user.save()
-    StaffAccount.objects.get_or_create(user=user, defaults={'role': StaffAccount.Role.SUPERADMIN})
-    print('✅ HQ user created: hq@example.com / test123456')
-else:
-    print('⚠️  User already exists')
-"
-```
-
-#### 5. تشغيل Frontend
-
-**في terminal جديد:**
-
-```bash
-cd frontend
-
-# تثبيت dependencies (أول مرة فقط)
-npm install
-
-# تشغيل development server
-npm run dev
-```
-
-Frontend سيعمل على: `http://localhost:3000`
-
----
-
-## 🖥️ الطريقة الثانية: تشغيل محلي بدون Docker
-
-### المتطلبات
-- Python 3.11+
-- PostgreSQL مع pgvector extension
-- Redis
-- Node.js 18+
-
-### الخطوات
-
-#### 1. إعداد Backend
-
-```bash
-# إنشاء virtual environment
-python -m venv bot_venv
-
-# تفعيل virtual environment
-# على Windows PowerShell:
-bot_venv\Scripts\Activate.ps1
-# أو على Git Bash:
-source bot_venv/Scripts/activate
-
-# تثبيت dependencies
-pip install -r requirements.txt
-
-# إنشاء ملف .env (انظر أعلاه)
-```
-
-#### 2. إعداد قاعدة البيانات
-
-```bash
-# تأكد أن PostgreSQL يعمل
-# أنشئ database:
-# psql -U postgres
-# CREATE DATABASE ai_appointment;
-# \q
-
-# تشغيل migrations
-python manage.py migrate
-
-# إضافة بيانات تجريبية
-python manage.py seed_data
-```
-
-#### 3. تشغيل Backend
-
-**Terminal 1 - Django Server:**
-```bash
-python manage.py runserver
-```
-يعمل على: `http://localhost:8000`
-
-**Terminal 2 - Celery Worker:**
-```bash
-celery -A backend worker -l info
-```
-
-**Terminal 3 - Celery Beat:**
-```bash
-celery -A backend beat -l info
-```
-
-#### 4. تشغيل Frontend
-
-**Terminal 4:**
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
----
-
-## ✅ التحقق من التشغيل
-
-### 1. Backend Health Check
-
-```bash
-# في المتصفح أو curl:
-http://localhost:8000/health/
-
-# يجب أن ترى:
-{"status": "ok", "service": "ai-appointment-backend"}
-```
-
-### 2. Frontend
-
-افتح المتصفح:
-```
-http://localhost:3000
-```
-
-### 3. تسجيل الدخول
-
-**ملاحظة مهمة**: `seed_data` command ينشئ تلقائياً مستخدم HQ:
-- Email: `admin@example.com`
-- Password: `Admin!234`
-
-1. افتح `http://localhost:3000/login`
-2. استخدم:
-   - Email: `admin@example.com`
-   - Password: `Admin!234`
-3. بعد تسجيل الدخول، اختر عيادة أو انتقل إلى `/hq`
-
-**أو** إذا أنشأت مستخدم HQ يدوياً (انظر الخطوة 4):
-- Email: `hq@example.com`
-- Password: `test123456`
-
----
-
-## 🧪 سيناريوهات الاختبار
-
-### 1. اختبار HQ Control Panel
-
-1. سجل دخول كمستخدم HQ
-2. انتقل إلى `/hq`
-3. أنشئ tenant جديد:
-   - اضغط "New Tenant"
-   - املأ البيانات
-   - انسخ invite token
-4. افتح `/hq/tenants/[slug]` لرؤية تفاصيل العيادة
-
-### 2. اختبار Onboarding
-
-1. افتح رابط الدعوة: `/accept-invite?token=...`
-2. أنشئ كلمة مرور
-3. بعد تسجيل الدخول، انتقل إلى `/c/[slug]/onboarding`
-4. اتبع Setup Checklist
-
-### 3. اختبار Clinic Portal
-
-1. سجل دخول كـ clinic owner
-2. انتقل إلى `/c/[slug]/dashboard`
-3. جرب:
-   - Conversations
-   - Appointments
-   - Services
-   - Templates
-   - Integrations
-
----
-
-## 🔧 إصلاح المشاكل الشائعة
-
-### Backend لا يعمل
-
-```bash
-# تحقق من logs
-docker-compose logs web
-
-# إعادة بناء
-docker-compose build web
-docker-compose up -d web
-```
-
-### Frontend لا يتصل بالBackend
-
-1. تحقق من `NEXT_PUBLIC_BACKEND_URL` في `.env`
-2. تأكد أن Backend يعمل على `http://localhost:8000`
-3. تحقق من CORS settings في `backend/settings.py`
-
-### Database Connection Error
-
-```bash
-# تحقق من PostgreSQL
-docker-compose logs db
-
-# إعادة تشغيل
-docker-compose restart db
-```
-
-### Celery لا يعمل
-
-```bash
-# تحقق من Redis
-docker-compose logs redis
-
-# إعادة تشغيل worker
-docker-compose restart worker beat
-```
-
----
-
-## 📝 ملاحظات مهمة
-
-1. **للاختبار فقط**: استخدم `DJANGO_DEBUG=true` و `WHATSAPP_TEST_MODE=true`
-2. **بيانات تجريبية**: `seed_data` command يضيف عيادات وخدمات تجريبية
-3. **HQ User**: يجب إنشاؤه يدوياً (انظر أعلاه)
-4. **WhatsApp**: في test mode، لا يحتاج إعداد حقيقي
-5. **Google Calendar**: اختياري للاختبار الأساسي
-
----
-
-## 🛑 إيقاف المشروع
-
-### Docker Compose:
-```bash
-make dev-down
-# أو
 docker-compose down
 ```
 
-### محلي:
-- اضغط `Ctrl+C` في كل terminal
-- أو أوقف PostgreSQL و Redis يدوياً
-
----
-
-## 📊 URLs للاختبار
-
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **Health Check**: http://localhost:8000/health/
-- **Readiness**: http://localhost:8000/ready/
-- **Admin Panel**: http://localhost:8000/admin/ (إذا كان مفعّل)
-
----
-
-## 🎯 الخطوات السريعة (Quick Start)
-
+### عرض Logs:
 ```bash
-# 1. إنشاء .env (إذا لم يكن موجود)
-# 2. تشغيل Docker
-make dev-up
-
-# 3. إعداد DB
-make migrate
-make seed
-
-# 4. (اختياري) إنشاء HQ user إضافي
-# ملاحظة: seed_data ينشئ تلقائياً admin@example.com / Admin!234
-# إذا أردت مستخدم إضافي، انظر الخطوة 4 في الدليل
-
-# 5. Frontend (في terminal جديد)
-cd frontend && npm install && npm run dev
-
-# 6. افتح http://localhost:3000
+docker-compose logs -f web
+docker-compose logs -f worker
 ```
 
 ---
 
-## ✅ Checklist قبل الاختبار
+## 📋 Checklist للتجربة الحقيقية
 
-- [ ] Docker Desktop مثبت ومشغل
-- [ ] ملف `.env` موجود في root directory
-- [ ] جميع services تعمل (`docker-compose ps` يجب أن يظهر 5 services)
-- [ ] Migrations تمت (`make migrate`)
-- [ ] Seed data تمت (`make seed`)
-- [ ] HQ user موجود (seed_data ينشئه تلقائياً: admin@example.com / Admin!234)
-  - للتحقق: `docker-compose exec web python manage.py shell -c "from apps.accounts.models import StaffAccount; print(StaffAccount.objects.count())"`
-- [ ] Frontend dependencies مثبتة (`cd frontend && npm install`)
-- [ ] Frontend يعمل على port 3000
-- [ ] Backend يعمل على port 8000
-- [ ] Health check يعمل: `curl http://localhost:8000/health/`
+### على مستوى النظام (.env):
+- [x] ✅ DeepSeek API Key
+- [x] ✅ Google Calendar OAuth (Client ID, Secret, Redirect URI)
+- [x] ✅ WhatsApp Cloud API (Meta) - جاهز
 
----
-
-**ملاحظة**: للاختبار الكامل، قد تحتاج إلى:
-- DeepSeek API key (للـ LLM)
-- Google OAuth credentials (لـ Calendar)
-- WhatsApp credentials (أو استخدام test mode)
+### لكل عيادة:
+- [ ] ✅ Services موجودة
+- [ ] ✅ Operating Hours معرّفة
+- [ ] ✅ WhatsApp Channel متصل (Meta Cloud API)
+  - [ ] Phone Number ID معرّف
+  - [ ] Access Token معرّف
+- [ ] ✅ Google Calendar مرتبط
+- [ ] ✅ Message Templates موجودة
 
 ---
 
-# 🚀 دليل النشر (Deployment Guide)
+## 🎯 الهدف النهائي
 
-## ✅ ما هو موجود وجاهز:
+**كل عيادة لها رقم WhatsApp خاص بها تتحدث مع عملائها**
 
-### 1. **Backend Infrastructure**
-- ✅ `Dockerfile.prod` - جاهز للإنتاج
-- ✅ `docker-compose.prod.yml` - إعدادات الإنتاج
-- ✅ `gunicorn.conf.py` - إعدادات Gunicorn
-- ✅ `nginx.conf` - إعدادات Nginx مع SSL
-- ✅ PostgreSQL مع pgvector
-- ✅ Redis للـ Celery
-- ✅ Celery Worker & Beat
-
-### 2. **Frontend**
-- ✅ `Dockerfile.frontend` - جاهز للإنتاج
-- ✅ Next.js 14.1.0 مع standalone output
-- ✅ Production build scripts
-- ✅ API routes جاهزة
-- ✅ Middleware للـ authentication
-
-### 3. **Security**
-- ✅ HTTPS configuration في Nginx
-- ✅ Security headers
-- ✅ JWT authentication
-- ✅ httpOnly cookies
-- ✅ CORS settings
-
-### 4. **Health Checks**
-- ✅ `/health/` endpoint موجود
-- ✅ Health checks في Dockerfiles
+- ✅ كل عيادة → WhatsApp Channel (Meta Cloud API)
+- ✅ كل عيادة → رقم WhatsApp خاص (Phone Number ID)
+- ✅ AI (DeepSeek) → يرد تلقائياً على الرسائل
+- ✅ Google Calendar → مزامنة المواعيد تلقائياً
+- ✅ كل عيادة مستقلة تماماً
 
 ---
 
-## ⚠️ ما يحتاج إلى إعداد قبل النشر:
+## 📚 روابط مفيدة
 
-### 1. **Environment Variables (.env)**
-
-#### Backend Variables:
-```env
-# Django Core
-DJANGO_SECRET_KEY=<generate-strong-secret-key>
-DJANGO_DEBUG=false
-DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
-
-# Database
-POSTGRES_DB=ai_appointment
-POSTGRES_USER=ai_user
-POSTGRES_PASSWORD=<strong-password>
-POSTGRES_HOST=db
-POSTGRES_PORT=5432
-
-# Redis
-REDIS_PASSWORD=<strong-password>
-CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
-
-# Security
-ENCRYPTION_KEY=<generate-strong-encryption-key>
-LEAD_WEBHOOK_SECRET=<generate-secret>
-
-# LLM (DeepSeek)
-DEEPSEEK_API_KEY=<your-deepseek-api-key>
-DEEPSEEK_API_BASE=https://api.deepseek.com
-
-# Google Calendar OAuth
-GOOGLE_CLIENT_ID=<your-google-client-id>
-GOOGLE_CLIENT_SECRET=<your-google-client-secret>
-GOOGLE_REDIRECT_URI=https://yourdomain.com/calendars/google/callback
-
-# WhatsApp
-WHATSAPP_DEFAULT_SENDER=<whatsapp-number>
-WHATSAPP_SESSION_FALLBACK_HSM_NAME=session_clarify
-
-# JWT
-JWT_ACCESS_LIFETIME_MINUTES=30
-JWT_REFRESH_LIFETIME_DAYS=7
-
-# Support Sessions
-SUPPORT_SESSION_MINUTES=60
-
-# Celery
-CELERY_SWEEP_TENTATIVE_SECONDS=600
-```
-
-#### Frontend Variables:
-```env
-NEXT_PUBLIC_BACKEND_URL=https://api.yourdomain.com
-NEXT_PUBLIC_DEFAULT_TZ=UTC
-```
-
-### 2. **SSL Certificates**
-- ⚠️ تحتاج إلى شهادات SSL في مجلد `ssl/`:
-  - `ssl/cert.pem`
-  - `ssl/key.pem`
-- أو استخدام Let's Encrypt مع Certbot
-
-### 3. **Domain & DNS**
-- ⚠️ تحتاج إلى:
-  - Domain name
-  - DNS records (A record)
-  - SSL certificate
-
-### 4. **Initial Data**
-- ⚠️ تحتاج إلى:
-  - إنشاء HQ staff account (SUPERADMIN)
-  - Seed data (اختياري)
+- **DeepSeek**: https://platform.deepseek.com/
+- **Google Cloud Console**: https://console.cloud.google.com/
+- **Meta WhatsApp Business**: https://business.facebook.com/
+- **Twilio WhatsApp**: https://www.twilio.com/whatsapp
 
 ---
 
-## 🔧 خطوات النشر:
+## ⚠️ ملاحظات مهمة
 
-### الخطوة 1: إعداد ملف .env
-```bash
-# إنشاء ملف .env في root directory
-# استخدم القائمة أعلاه لجميع المتغيرات المطلوبة
-```
+### 1. WhatsApp Cloud API (Meta)
+- **Phone Number ID**: كل عيادة تحتاج Phone Number ID خاص (أو نفس ID إذا كان نفس الرقم)
+- **Access Token**: يمكن استخدام نفس Token لعدة عيادات إذا كانت من نفس Meta App
+- **API Version**: افتراضي `v18.0` (يمكن تغييره في metadata)
 
-### الخطوة 2: إعداد SSL Certificates
-```bash
-# إنشاء مجلد ssl
-mkdir ssl
+### 2. DeepSeek AI
+- **مشترك**: نفس API Key لجميع العيادات
+- **لكل عيادة**: يمكن تخصيص الردود عبر Knowledge Base
 
-# إضافة شهادات SSL
-# cert.pem و key.pem
-```
-
-### الخطوة 3: بناء الصور
-```bash
-# بناء جميع الصور
-docker-compose -f docker-compose.prod.yml build
-```
-
-### الخطوة 4: تشغيل الخدمات
-```bash
-# تشغيل جميع الخدمات
-docker-compose -f docker-compose.prod.yml up -d
-
-# التحقق من الحالة
-docker-compose -f docker-compose.prod.yml ps
-```
-
-### الخطوة 5: إعداد قاعدة البيانات
-```bash
-# Migrations تعمل تلقائياً عند بدء web service
-# للتحقق:
-docker-compose -f docker-compose.prod.yml exec web python manage.py migrate
-
-# إنشاء HQ staff account
-docker-compose -f docker-compose.prod.yml exec web python manage.py shell
-```
-
-```python
-from django.contrib.auth.models import User
-from apps.accounts.models import StaffAccount
-
-user = User.objects.create_user(
-    username="hq_admin",
-    email="admin@yourdomain.com",
-    password="strong-password-here",
-    is_active=True
-)
-
-StaffAccount.objects.create(
-    user=user,
-    role=StaffAccount.Role.SUPERADMIN
-)
-```
-
-### الخطوة 6: التحقق من النشر
-```bash
-# Health check
-curl https://yourdomain.com/health/
-
-# Frontend
-curl https://yourdomain.com/
-
-# Backend API
-curl https://yourdomain.com/api/health/
-```
+### 3. Google Calendar
+- **OAuth Credentials**: مشتركة لجميع العيادات (من `.env`)
+- **حساب Google**: يمكن استخدام نفس الحساب أو حساب خاص لكل عيادة
 
 ---
 
-## 📝 ملاحظات مهمة:
-
-1. **Security**: تأكد من تغيير جميع الـ secrets في production
-2. **Database**: استخدم PostgreSQL في production (ليس SQLite)
-3. **SSL**: HTTPS إلزامي في production
-4. **Backup**: ضع خطة backup منتظمة للـ database
-5. **Monitoring**: راقب الأداء والأخطاء
-6. **Updates**: خطط لـ updates وmaintenance windows
-
----
-
-## 🔄 تحديث التطبيق:
-
-```bash
-# 1. سحب التحديثات
-git pull
-
-# 2. إعادة بناء الصور
-docker-compose -f docker-compose.prod.yml build
-
-# 3. إعادة تشغيل الخدمات
-docker-compose -f docker-compose.prod.yml up -d
-
-# 4. تشغيل migrations (إذا لزم الأمر)
-docker-compose -f docker-compose.prod.yml exec web python manage.py migrate
-```
-
----
-
-## 🛑 إيقاف التطبيق:
-
-```bash
-# إيقاف جميع الخدمات
-docker-compose -f docker-compose.prod.yml down
-
-# إيقاف مع حذف volumes (احذر!)
-docker-compose -f docker-compose.prod.yml down -v
-```
-
----
-
-## 📊 Services في Production:
-
-- `db` - PostgreSQL مع pgvector
-- `redis` - Redis للـ Celery
-- `web` - Django Backend (Gunicorn)
-- `worker` - Celery Worker
-- `beat` - Celery Beat
-- `frontend` - Next.js Frontend
-- `nginx` - Nginx Reverse Proxy
-
----
-
-## ✅ Checklist قبل النشر:
-
-- [ ] ملف `.env` موجود مع جميع المتغيرات
-- [ ] SSL certificates موجودة في `ssl/`
-- [ ] Domain & DNS مُعدة
-- [ ] `DJANGO_DEBUG=false`
-- [ ] جميع secrets قوية ومختلفة عن development
-- [ ] `ALLOWED_HOSTS` يحتوي على domain الصحيح
-- [ ] HQ staff account تم إنشاؤه
-- [ ] Database migrations تمت
-- [ ] جميع services تعمل
-- [ ] Health checks تعمل
-- [ ] Frontend و Backend يتصلان بشكل صحيح
-
----
-
-# ✅ تقرير جاهزية المشروع للانطلاق
-
-**التاريخ**: 2025-11-29  
-**الحالة**: ✅ **جاهز للانطلاق**
-
-## 📋 ملخص ما تم إنجازه
-
-### 1. ✅ ملفات الإعداد
-- ✅ **`env.example`**: ملف كامل مع جميع المتغيرات وشرح مفصل
-- ✅ **Scripts مساعدة**: 4 scripts جاهزة للاستخدام
-
-### 2. ✅ الأمان
-- ✅ **Security Headers**: جميع headers موجودة وصحيحة
-- ✅ **HTTPS/SSL**: إعدادات صحيحة
-- ✅ **Secrets Management**: جميع secrets في environment variables
-- ✅ **Authentication & Authorization**: JWT مع role-based access
-
-### 3. ✅ Error Handling
-- ✅ **Backend**: standardized responses
-- ✅ **Frontend**: error handling شامل
-
-### 4. ✅ الوثائق
-- ✅ **`README.md`**: محدث بمعلومات شاملة
-- ✅ **`TESTING_GUIDE.md`**: دليل كامل
-- ✅ **`SECURITY_REVIEW.md`**: تقرير الأمان
-
-### 5. ✅ Docker & Deployment
-- ✅ جميع Dockerfiles جاهزة
-- ✅ Docker Compose production جاهز
-- ✅ Nginx configuration جاهز
-
----
-
-# 📋 خلاصة ما تبقى قبل النشر - مع شرح الحلول
-
-## ✅ ما تم إنجازه (جاهز 100%):
-
-1. ✅ **Dockerfiles** - `Dockerfile.prod` و `Dockerfile.frontend`
-2. ✅ **Docker Compose** - `docker-compose.prod.yml` جاهز
-3. ✅ **Nginx Configuration** - `nginx.conf` مع SSL و routing
-4. ✅ **Health Checks** - `/health/` endpoint موجود
-5. ✅ **Code** - جميع الكود جاهز ومختبر
-
----
-
-## ⚠️ ما تبقى (4 نقاط فقط):
-
-### 1️⃣ إنشاء ملف `.env` مع جميع المتغيرات
-
-**الخطوات:**
-
-#### أ) إنشاء الملف:
-```bash
-# في root directory للمشروع
-touch .env
-# أو على Windows:
-type nul > .env
-```
-
-#### ب) إضافة المحتوى:
-افتح `.env` وأضف:
-
-```env
-# ============================================
-# Django Core Settings
-# ============================================
-DJANGO_SECRET_KEY=<generate-strong-secret>
-DJANGO_DEBUG=false
-DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
-
-# ============================================
-# Database (PostgreSQL)
-# ============================================
-POSTGRES_DB=ai_appointment
-POSTGRES_USER=ai_user
-POSTGRES_PASSWORD=<strong-password>
-POSTGRES_HOST=db
-POSTGRES_PORT=5432
-
-# ============================================
-# Redis
-# ============================================
-REDIS_PASSWORD=<strong-password>
-CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
-
-# ============================================
-# Security
-# ============================================
-ENCRYPTION_KEY=<generate-strong-key>
-LEAD_WEBHOOK_SECRET=<generate-secret>
-
-# ============================================
-# LLM (DeepSeek) - اختياري
-# ============================================
-DEEPSEEK_API_KEY=your-deepseek-api-key
-DEEPSEEK_API_BASE=https://api.deepseek.com
-
-# ============================================
-# Google Calendar OAuth - اختياري
-# ============================================
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_REDIRECT_URI=https://yourdomain.com/calendars/google/callback
-
-# ============================================
-# WhatsApp - اختياري
-# ============================================
-WHATSAPP_DEFAULT_SENDER=+1234567890
-WHATSAPP_SESSION_FALLBACK_HSM_NAME=session_clarify
-
-# ============================================
-# JWT Settings
-# ============================================
-JWT_ACCESS_LIFETIME_MINUTES=30
-JWT_REFRESH_LIFETIME_DAYS=7
-
-# ============================================
-# Support Sessions
-# ============================================
-SUPPORT_SESSION_MINUTES=60
-
-# ============================================
-# Celery Settings
-# ============================================
-CELERY_SWEEP_TENTATIVE_SECONDS=600
-
-# ============================================
-# Frontend (Next.js)
-# ============================================
-NEXT_PUBLIC_BACKEND_URL=https://yourdomain.com
-NEXT_PUBLIC_DEFAULT_TZ=UTC
-
-# ============================================
-# CORS (if needed)
-# ============================================
-CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
-```
-
-#### ج) توليد Secrets القوية:
-
-**لـ DJANGO_SECRET_KEY:**
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(50))"
-```
-
-**لـ ENCRYPTION_KEY:**
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
-```
-
-**لـ LEAD_WEBHOOK_SECRET:**
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-**لـ POSTGRES_PASSWORD و REDIS_PASSWORD:**
-استخدم كلمات مرور قوية (16+ حرف، أرقام، رموز)
-
----
-
-### 2️⃣ إعداد SSL Certificates
-
-**الخيار الأول: Let's Encrypt (مجاني - موصى به)**
-
-```bash
-# 1. تثبيت Certbot
-sudo apt-get update
-sudo apt-get install certbot
-
-# 2. الحصول على شهادة
-sudo certbot certonly --standalone -d yourdomain.com -d www.yourdomain.com
-
-# 3. نسخ الشهادات إلى مجلد ssl
-mkdir -p ssl
-sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ssl/cert.pem
-sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ssl/key.pem
-sudo chmod 644 ssl/cert.pem
-sudo chmod 600 ssl/key.pem
-```
-
-**الخيار الثاني: Self-Signed (للاختبار فقط - لا تستخدم في production)**
-
-```bash
-mkdir -p ssl
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout ssl/key.pem \
-  -out ssl/cert.pem \
-  -subj "/C=US/ST=State/L=City/O=Organization/CN=yourdomain.com"
-```
-
----
-
-### 3️⃣ إعداد Domain & DNS
-
-**الخطوات:**
-
-1. **شراء Domain** من أي مزود (Namecheap, GoDaddy, Cloudflare, etc.)
-
-2. **إعداد DNS Records:**
-   - **A Record:**
-     ```
-     Type: A
-     Name: @ (أو yourdomain.com)
-     Value: <IP-address-of-your-server>
-     TTL: 3600
-     ```
-   - **A Record للـ www:**
-     ```
-     Type: A
-     Name: www
-     Value: <IP-address-of-your-server>
-     TTL: 3600
-     ```
-
-3. **الحصول على IP Server:**
-   ```bash
-   curl ifconfig.me
-   ```
-
-4. **الانتظار:** DNS propagation قد يستغرق 24-48 ساعة
-
----
-
-### 4️⃣ إنشاء HQ Staff Account (بعد النشر)
-
-**الخطوات:**
-
-#### أ) بعد تشغيل الخدمات:
-```bash
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-#### ب) إنشاء المستخدم (سطر واحد):
-```bash
-docker-compose -f docker-compose.prod.yml exec web python manage.py shell -c "
-from django.contrib.auth.models import User
-from apps.accounts.models import StaffAccount
-user = User.objects.create_user(
-    username='hq_admin',
-    email='admin@yourdomain.com',
-    password='YourStrongPassword123!',
-    is_active=True
-)
-StaffAccount.objects.create(user=user, role=StaffAccount.Role.SUPERADMIN)
-print('✅ HQ user created: admin@yourdomain.com')
-"
-```
-
----
-
-## 🚀 خطوات النشر الكاملة (بترتيب):
-
-1. **إعداد Server:**
-   ```bash
-   sudo apt-get update
-   sudo apt-get install -y docker.io docker-compose git
-   sudo systemctl start docker
-   sudo systemctl enable docker
-   ```
-
-2. **رفع الكود:**
-   ```bash
-   git clone <your-repo-url>
-   cd ai-appointment-backend
-   ```
-
-3. **إنشاء ملف .env** (انظر الخطوة 1 أعلاه)
-
-4. **إعداد SSL** (انظر الخطوة 2 أعلاه)
-
-5. **بناء الصور:**
-   ```bash
-   docker-compose -f docker-compose.prod.yml build
-   ```
-
-6. **تشغيل الخدمات:**
-   ```bash
-   docker-compose -f docker-compose.prod.yml up -d
-   ```
-
-7. **التحقق من الحالة:**
-   ```bash
-   docker-compose -f docker-compose.prod.yml ps
-   ```
-
-8. **إنشاء HQ Account** (انظر الخطوة 4 أعلاه)
-
-9. **اختبار النشر:**
-   ```bash
-   curl https://yourdomain.com/health/
-   ```
-
----
-
-## 🔧 حل المشاكل الشائعة:
-
-### المشكلة: Nginx لا يبدأ
-**الحل:**
-```bash
-# تحقق من SSL certificates
-ls -la ssl/
-# يجب أن ترى cert.pem و key.pem
-
-# تحقق من nginx.conf
-docker-compose -f docker-compose.prod.yml exec nginx nginx -t
-```
-
-### المشكلة: Database connection error
-**الحل:**
-```bash
-# تحقق من PostgreSQL
-docker-compose -f docker-compose.prod.yml logs db
-
-# تحقق من .env - POSTGRES_PASSWORD يجب أن يكون صحيح
-```
-
-### المشكلة: Frontend لا يتصل بالBackend
-**الحل:**
-```bash
-# تحقق من NEXT_PUBLIC_BACKEND_URL في .env
-# يجب أن يكون: https://yourdomain.com
-```
-
-### المشكلة: SSL certificate expired
-**الحل:**
-```bash
-# تجديد Let's Encrypt
-sudo certbot renew
-sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ssl/cert.pem
-sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ssl/key.pem
-docker-compose -f docker-compose.prod.yml restart nginx
-```
-
----
-
-## 🎯 الخلاصة النهائية:
-
-**ما تبقى (4 نقاط فقط):**
-1. ✅ إنشاء `.env` (5 دقائق)
-2. ✅ إعداد SSL (10-15 دقيقة)
-3. ✅ إعداد Domain & DNS (يعتمد على المزود)
-4. ✅ إنشاء HQ account (2 دقيقة بعد النشر)
-
-**الوقت الإجمالي:** ~30 دقيقة (باستثناء DNS propagation)
-
-**كل شيء آخر جاهز! 🚀**
-
----
-
-## 📝 ملاحظات مهمة:
-
-1. **Security**: لا تشارك ملف `.env` أبداً
-2. **Backup**: ضع خطة backup للـ database
-3. **Monitoring**: راقب logs بانتظام
-4. **Updates**: خطط لـ updates منتظمة
-5. **SSL Renewal**: Let's Encrypt يحتاج تجديد كل 90 يوم
-
----
-
-## 🛠️ Scripts مساعدة للـ Deployment
-
-### 1. توليد Secrets آمنة
-
-```bash
-make generate-secrets
-# أو
-bash scripts/generate_secrets.sh
-```
-
-يولد:
-- `DJANGO_SECRET_KEY`
-- `ENCRYPTION_KEY`
-- `LEAD_WEBHOOK_SECRET`
-- `POSTGRES_PASSWORD`
-- `REDIS_PASSWORD`
-
-### 2. إنشاء HQ Admin User
-
-```bash
-make create-hq-user
-# أو مع parameters:
-make create-hq-user admin@yourdomain.com YourPassword123! SUPERADMIN
-# أو
-bash scripts/create_hq_user.sh admin@yourdomain.com YourPassword123! SUPERADMIN
-```
-
-### 3. فحص صحة الخدمات
-
-```bash
-make health
-# أو
-bash scripts/check_health.sh
-```
-
-يفحص:
-- Docker services status
-- Backend health endpoint
-- Database connection
-- Redis connection
-- Celery worker status
-
-### 4. نسخ احتياطي للـ Database
-
-```bash
-make backup
-# أو
-bash scripts/backup_db.sh
-# أو مع اسم ملف محدد:
-bash scripts/backup_db.sh backups/my_backup.sql
-```
-
-- النسخ الاحتياطي يتم ضغطه تلقائياً (`.sql.gz`)
-- يتم الاحتفاظ بآخر 7 نسخ احتياطية تلقائياً
-- النسخ الاحتياطي محفوظ في `./backups/`
-
-### 5. أوامر Make المتاحة
-
-#### Development:
-- `make dev-up` - تشغيل جميع services
-- `make dev-down` - إيقاف جميع services
-- `make dev-shell` - Django shell
-- `make migrate` - تشغيل migrations
-- `make seed` - Seed initial data
-- `make test` - تشغيل tests
-
-#### Production:
-- `make prod-build` - بناء production images
-- `make prod-up` - تشغيل production services
-- `make prod-down` - إيقاف production services
-- `make prod-logs` - عرض logs
-- `make prod-shell` - Django shell في production
-- `make prod-migrate` - تشغيل migrations في production
-
-#### Local Testing (Full Stack):
-- `make local-build` - بناء الصور للتجربة المحلية
-- `make local-up` - تشغيل الخدمات للتجربة المحلية
-- `make local-down` - إيقاف الخدمات
-- `make local-logs` - عرض logs
-- `make local-shell` - Django shell
-- `make local-migrate` - تشغيل migrations
-- `make local-create-user` - إنشاء HQ user
-
-#### Utilities:
-- `make health` - فحص صحة الخدمات
-- `make backup` - نسخ احتياطي
-- `make create-hq-user` - إنشاء HQ user
-- `make generate-secrets` - توليد secrets
-
----
-
-# 🧪 دليل التجربة المتكاملة - قبل النشر
-
-## ⚡ بدء سريع
-
-### 1. إنشاء ملف .env
-```powershell
-# على Windows
-Copy-Item env.example .env
-```
-
-### 2. بناء وتشغيل
-```bash
-make local-build
-make local-up
-```
-
-### 3. إنشاء مستخدم HQ
-```bash
-make local-create-user
-```
-
-### 4. اختبار
-- افتح: `http://localhost:3000/login`
-- سجل دخول: `admin@test.com` / `Admin123!`
-
----
-
-## 📋 دليل التجربة المتكاملة الكامل
-
-### الخطوة 1: إعداد ملف .env
-
-افتح ملف `.env` وعدّل القيم التالية:
-
-```env
-# Django
-DJANGO_SECRET_KEY=<generate-strong-secret>
-DJANGO_DEBUG=false
-DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
-
-# Database
-POSTGRES_DB=ai_appointment
-POSTGRES_USER=ai_user
-POSTGRES_PASSWORD=<strong-password>
-
-# Redis
-REDIS_PASSWORD=<strong-password>
-
-# Security
-ENCRYPTION_KEY=<generate-strong-key>
-LEAD_WEBHOOK_SECRET=<generate-secret>
-
-# Frontend
-NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
-
-# CORS
-CORS_ALLOWED_ORIGINS=http://localhost:3000
-
-# SSL (false للتجربة المحلية)
-SECURE_SSL_REDIRECT=false
-```
-
-### الخطوة 2: بناء الصور
-
-```bash
-make local-build
-# أو
-docker-compose -f docker-compose.local.yml build
-```
-
-### الخطوة 3: تشغيل الخدمات
-
-```bash
-make local-up
-# أو
-docker-compose -f docker-compose.local.yml up -d
-```
-
-**الخدمات التي ستعمل:**
-- ✅ `db` - PostgreSQL Database
-- ✅ `redis` - Redis Cache
-- ✅ `web` - Django Backend
-- ✅ `worker` - Celery Worker
-- ✅ `beat` - Celery Beat
-- ✅ `frontend` - Next.js Frontend
-- ✅ `nginx` - Nginx Reverse Proxy
-
-### الخطوة 4: إنشاء HQ User
-
-```bash
-make local-create-user
-# أو
-bash scripts/create_hq_user_local.sh admin@test.com Admin123! SUPERADMIN
-```
-
-### الخطوة 5: اختبار الوظائف
-
-#### 5.1 اختبار تسجيل الدخول
-1. افتح: `http://localhost:3000/login`
-2. سجل دخول بـ: `admin@test.com` / `Admin123!`
-
-#### 5.2 اختبار HQ Portal
-- ✅ عرض قائمة العيادات
-- ✅ إنشاء عيادة جديدة
-- ✅ عرض تفاصيل عيادة
-
-#### 5.3 اختبار Clinic Portal
-1. من HQ Portal، انقر على عيادة
-2. يجب أن ترى:
-   - ✅ Dashboard
-   - ✅ Settings (تعديل البيانات)
-   - ✅ Services & Hours
-   - ✅ Messages
-   - ✅ Appointments
-   - ✅ "Back to HQ Portal" button (للـ HQ staff فقط)
-
-### الخطوة 6: فحص الصحة
-
-```bash
-# فحص Health
-curl http://localhost:8000/health/
-
-# أو
-bash scripts/check_health_local.sh
-```
-
-### الخطوة 7: عرض Logs
-
-```bash
-make local-logs
-# أو لخدمة محددة:
-docker-compose -f docker-compose.local.yml logs -f web
-```
-
-### الخطوة 8: إيقاف
-
-```bash
-make local-down
-# أو
-docker-compose -f docker-compose.local.yml down
-```
-
----
-
-## 🔒 مراجعة الأمان
-
-### ✅ Security Headers
-- ✅ **Django Settings**: جميع security headers موجودة وصحيحة
-- ✅ **Nginx Configuration**: Security headers موجودة
-
-### ✅ HTTPS/SSL
-- ✅ **SSL Configuration**: صحيح في Nginx
-- ✅ **Django SSL Settings**: صحيح
-
-### ✅ Secrets Management
-- ✅ **Environment Variables**: جميع secrets في `.env`
-- ⚠️ **ملاحظة**: يجب تغيير جميع secrets في production
-
-### ✅ Authentication & Authorization
-- ✅ **JWT Authentication**: مستخدم بشكل صحيح
-- ✅ **httpOnly Cookies**: مستخدمة في Frontend
-- ✅ **Role-Based Access Control**: موجود في Backend
-
-### ✅ Error Handling
-- ✅ **Backend**: standardized responses
-- ✅ **Frontend**: error handling شامل
-
----
-
-## 📋 Checklist التجربة المتكاملة
-
-### Infrastructure ✅
-- [ ] جميع الخدمات تعمل
-- [ ] Database متصل
-- [ ] Redis متصل
-- [ ] Celery Worker يعمل
-- [ ] Celery Beat يعمل
-
-### Backend ✅
-- [ ] Health endpoint يعمل
-- [ ] تسجيل الدخول يعمل
-- [ ] JWT tokens تعمل
-- [ ] API endpoints تستجيب
-
-### Frontend ✅
-- [ ] Frontend يعمل
-- [ ] تسجيل الدخول يعمل
-- [ ] HQ Portal يعمل
-- [ ] Clinic Portal يعمل
-- [ ] Navigation يعمل
-- [ ] Settings page يعمل
-
-### Functionality ✅
-- [ ] إنشاء HQ user يعمل
-- [ ] عرض العيادات يعمل
-- [ ] إنشاء عيادة جديدة يعمل
-- [ ] تعديل Settings يعمل
-- [ ] تعديل Email يعمل
-- [ ] "Back to HQ Portal" button يظهر للـ HQ staff فقط
-
+## 🚀 جاهز للبدء!
+
+**الخطوات التالية:**
+1. تحقق من وجود عيادة: `docker-compose exec web python manage.py check_setup`
+2. أضف WhatsApp Channel لكل عيادة من `/c/[slug]/integrations`
+3. اربط Google Calendar من `/c/[slug]/integrations`
+4. أضف Services و Hours من `/c/[slug]/services`
+5. أضف Templates من `/c/[slug]/templates`
+6. اختبر إرسال رسالة WhatsApp!
+
+**كل شيء جاهز! 🎉**

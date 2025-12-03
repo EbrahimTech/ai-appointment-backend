@@ -1,7 +1,7 @@
 .PHONY: dev-up dev-down dev-shell migrate seed test beat-up beat-down
 .PHONY: prod-build prod-up prod-down prod-logs prod-shell
 .PHONY: local-build local-up local-down local-logs local-shell local-migrate local-create-user
-.PHONY: health backup create-hq-user generate-secrets
+.PHONY: health backup create-hq-user generate-secrets check-setup
 
 # Development commands
 dev-up:
@@ -81,3 +81,6 @@ create-hq-user:
 
 generate-secrets:
 	@bash scripts/generate_secrets.sh
+
+check-setup:
+	docker-compose exec web python manage.py check_setup
