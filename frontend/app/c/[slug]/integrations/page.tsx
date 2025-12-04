@@ -11,6 +11,12 @@ type WhatsAppStatus = {
   last_success_at: string | null;
   last_error_at: string | null;
   provider: string | null;
+  config: {
+    provider: string;
+    phone_number_id: string;
+    business_account_id: string;
+    api_version: string;
+  } | null;
 };
 
 type GoogleStatus = {
@@ -68,6 +74,17 @@ export default function ClinicIntegrationsPage() {
   const [outboxStatus, setOutboxStatus] = useState<OutboxStatus | null>(null);
   const [isPolling, setIsPolling] = useState(false);
   const [pollError, setPollError] = useState<string | null>(null);
+  
+  // WhatsApp Channel Configuration
+  const [showConfig, setShowConfig] = useState(false);
+  const [provider, setProvider] = useState("meta");
+  const [phoneNumberId, setPhoneNumberId] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+  const [businessAccountId, setBusinessAccountId] = useState("");
+  const [apiVersion, setApiVersion] = useState("v18.0");
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configSuccess, setConfigSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!outboxId) {
@@ -178,6 +195,64 @@ export default function ClinicIntegrationsPage() {
     }
   }
 
+  useEffect(() => {
+    // Load existing config if available
+    if (whatsapp?.config) {
+      setProvider(whatsapp.config.provider || "meta");
+      setPhoneNumberId(whatsapp.config.phone_number_id || "");
+      setBusinessAccountId(whatsapp.config.business_account_id || "");
+      setApiVersion(whatsapp.config.api_version || "v18.0");
+    }
+  }, [whatsapp]);
+
+  async function handleSaveWhatsAppConfig(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setConfigError(null);
+    setConfigSuccess(false);
+    setIsSaving(true);
+
+    try {
+      const response = await fetch(`/api/proxy/clinic/${slug}/channels/whatsapp`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          phone_number_id: phoneNumberId,
+          access_token: accessToken,
+          business_account_id: businessAccountId || undefined,
+          api_version: apiVersion,
+        }),
+      });
+      
+      // Check if response is JSON
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await response.text();
+        console.error("Non-JSON response:", text.substring(0, 200));
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "SAVE_FAILED");
+      }
+      setConfigSuccess(true);
+      setShowConfig(false);
+      setAccessToken(""); // Clear token for security
+      whatsappQuery.refetch();
+      setTimeout(() => setConfigSuccess(false), 3000);
+    } catch (error) {
+      console.error("Error saving WhatsApp config:", error);
+      if (error instanceof Error) {
+        setConfigError(error.message);
+      } else {
+        setConfigError("Failed to save configuration. Please check the console for details.");
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   if (whatsappQuery.isPending || googleQuery.isPending) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -250,10 +325,147 @@ export default function ClinicIntegrationsPage() {
         </div>
 
           <div className="grid gap-4 md:grid-cols-3 mb-6">
-          <InfoRow label="Provider" value={whatsapp?.provider} />
+          <InfoRow label="Provider" value={whatsapp?.provider || whatsapp?.config?.provider} />
+            <InfoRow label="Phone Number ID" value={whatsapp?.config?.phone_number_id || "—"} />
             <InfoRow label="Last Success" value={whatsapp?.last_success_at} />
             <InfoRow label="Last Error" value={whatsapp?.last_error_at} />
         </div>
+
+        {/* WhatsApp Channel Configuration */}
+        {!showConfig && (
+          <div className="mb-6">
+            <button
+              type="button"
+              onClick={() => setShowConfig(true)}
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+            >
+              <span>{whatsapp?.config ? "Update WhatsApp Channel" : "Add WhatsApp Channel"}</span>
+            </button>
+          </div>
+        )}
+
+        {showConfig && (
+          <form onSubmit={handleSaveWhatsAppConfig} className="mb-6 space-y-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
+            <h3 className="text-lg font-semibold text-gray-900">
+              {whatsapp?.config ? "Update WhatsApp Channel" : "Configure WhatsApp Channel"}
+            </h3>
+            
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700" htmlFor="provider">
+                  Provider *
+                </label>
+                <select
+                  id="provider"
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                >
+                  <option value="meta">Meta (Facebook)</option>
+                  <option value="facebook">Facebook</option>
+                  <option value="twilio">Twilio</option>
+                  <option value="generic">Generic</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700" htmlFor="phone-number-id">
+                  Phone Number ID * (Meta)
+                </label>
+                <input
+                  id="phone-number-id"
+                  type="text"
+                  value={phoneNumberId}
+                  onChange={(e) => setPhoneNumberId(e.target.value)}
+                  placeholder="123456789012345"
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required={provider === "meta" || provider === "facebook"}
+                />
+                <p className="text-xs text-gray-500">من Meta Business Manager → WhatsApp → Phone Numbers</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700" htmlFor="access-token">
+                Access Token *
+              </label>
+              <input
+                id="access-token"
+                type="password"
+                value={accessToken}
+                onChange={(e) => setAccessToken(e.target.value)}
+                placeholder="EAAxxxxxxxxxxxxx"
+                className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+              <p className="text-xs text-gray-500">من Meta Business Manager → WhatsApp → API Setup</p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700" htmlFor="business-account-id">
+                  Business Account ID (اختياري)
+                </label>
+                <input
+                  id="business-account-id"
+                  type="text"
+                  value={businessAccountId}
+                  onChange={(e) => setBusinessAccountId(e.target.value)}
+                  placeholder="123456789"
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700" htmlFor="api-version">
+                  API Version
+                </label>
+                <input
+                  id="api-version"
+                  type="text"
+                  value={apiVersion}
+                  onChange={(e) => setApiVersion(e.target.value)}
+                  placeholder="v18.0"
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            {configError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                <p className="text-sm text-red-900">{configError}</p>
+              </div>
+            )}
+
+            {configSuccess && (
+              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+                <p className="text-sm text-green-900">✅ تم حفظ الإعدادات بنجاح!</p>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="flex items-center gap-2 rounded-lg bg-green-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+              >
+                <span>{isSaving ? "جاري الحفظ..." : "حفظ"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConfig(false);
+                  setConfigError(null);
+                  setConfigSuccess(false);
+                }}
+                className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <span>إلغاء</span>
+              </button>
+            </div>
+          </form>
+        )}
 
           <form className="space-y-4" onSubmit={handleSendTest}>
           <div className="grid gap-4 md:grid-cols-2">

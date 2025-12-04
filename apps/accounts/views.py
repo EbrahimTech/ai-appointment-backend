@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 import secrets
@@ -2172,7 +2173,7 @@ class ClinicKnowledgePreviewView(APIView):
 
 
 class ClinicWhatsAppStatusView(APIView):
-    """Report WhatsApp channel health."""
+    """Report WhatsApp channel health and manage channel configuration."""
 
     permission_classes = [permissions.IsAuthenticated]
 
@@ -2185,7 +2186,94 @@ class ClinicWhatsAppStatusView(APIView):
     def get(self, request, slug: str):
         clinic: Clinic = request.clinic
         data = _whatsapp_channel_status(clinic)
+        
+        # Add current configuration if exists
+        account = clinic.channel_accounts.filter(channel=ChannelType.WHATSAPP).first()
+        if account:
+            metadata = account.metadata or {}
+            data["config"] = {
+                "provider": account.provider_name,
+                "phone_number_id": metadata.get("phone_number_id", ""),
+                "business_account_id": metadata.get("business_account_id", ""),
+                "api_version": metadata.get("api_version", "v18.0"),
+            }
+        else:
+            data["config"] = None
+        
         return ok_response(data)
+    
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def put(self, request, slug: str):
+        """Create or update WhatsApp channel configuration."""
+        try:
+            clinic: Clinic = request.clinic
+            payload = request.data or {}
+            
+            provider = str(payload.get("provider", "meta")).strip().lower()
+            phone_number_id = str(payload.get("phone_number_id", "")).strip()
+            access_token = str(payload.get("access_token", "")).strip()
+            business_account_id = str(payload.get("business_account_id", "")).strip()
+            api_version = str(payload.get("api_version", "v18.0")).strip()
+            
+            if not provider:
+                return error_response("INVALID_PROVIDER", status_code=400)
+            if provider not in ["meta", "facebook", "twilio", "generic"]:
+                return error_response("INVALID_PROVIDER", status_code=400)
+            if not access_token:
+                return error_response("INVALID_ACCESS_TOKEN", status_code=400)
+            
+            # For Meta/Facebook, phone_number_id is required
+            if provider in ["meta", "facebook"] and not phone_number_id:
+                return error_response("INVALID_PHONE_NUMBER_ID", status_code=400)
+            
+            metadata = {}
+            if phone_number_id:
+                metadata["phone_number_id"] = phone_number_id
+            if business_account_id:
+                metadata["business_account_id"] = business_account_id
+            if api_version:
+                metadata["api_version"] = api_version
+            
+            account, created = ChannelAccount.objects.update_or_create(
+                clinic=clinic,
+                channel=ChannelType.WHATSAPP,
+                defaults={
+                    "provider_name": provider,
+                    "access_token": access_token,
+                    "metadata": metadata,
+                }
+            )
+            
+            AuditLog.objects.create(
+                actor_user=request.user,
+                action="WHATSAPP_CHANNEL_UPDATE" if not created else "WHATSAPP_CHANNEL_CREATE",
+                scope=AuditLog.Scope.CLINIC,
+                clinic=clinic,
+                meta={
+                    "provider": provider,
+                    "phone_number_id": phone_number_id,
+                    "created": created,
+                },
+            )
+            
+            data = _whatsapp_channel_status(clinic)
+            data["config"] = {
+                "provider": account.provider_name,
+                "phone_number_id": metadata.get("phone_number_id", ""),
+                "business_account_id": metadata.get("business_account_id", ""),
+                "api_version": metadata.get("api_version", "v18.0"),
+            }
+            
+            return ok_response(data)
+        except Exception as exc:
+            logger = logging.getLogger(__name__)
+            logger.exception("Error in WhatsApp channel PUT")
+            return error_response(f"INTERNAL_ERROR: {str(exc)}", status_code=500)
 
 
 class ClinicWhatsAppTestView(APIView):

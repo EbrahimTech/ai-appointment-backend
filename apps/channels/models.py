@@ -50,8 +50,8 @@ class ChannelAccount(TimeStampedModel):
         max_length=20, choices=ChannelType.choices, default=ChannelType.WHATSAPP
     )
     provider_name = models.CharField(max_length=50, default="generic")
-    access_token = models.CharField(max_length=255)
-    refresh_token = models.CharField(max_length=255, blank=True)
+    access_token = models.CharField(max_length=1000)
+    refresh_token = models.CharField(max_length=1000, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:

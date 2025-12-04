@@ -5,11 +5,10 @@ Usage: python manage.py check_setup
 
 from django.core.management.base import BaseCommand
 from django.conf import settings
-from apps.clinics.models import Clinic
-from apps.accounts.models import StaffAccount
+from apps.clinics.models import Clinic, ServiceHours
+from apps.accounts.models import StaffAccount, ClinicMembership
 from apps.channels.models import ChannelAccount, ChannelType
 from apps.calendars.models import GoogleCredential
-from apps.services.models import ServiceHours
 from apps.channels.models import HSMTemplate, HSMTemplateStatus
 from apps.channels.models import OutboxMessage
 from datetime import timedelta
@@ -111,7 +110,8 @@ class Command(BaseCommand):
         for clinic in clinics:
             self.stdout.write(f"\n🏥 العيادة: {clinic.name} ({clinic.slug})")
             self.stdout.write(f"   ID: {clinic.id}")
-            self.stdout.write(f"   Email: {clinic.owner.email if clinic.owner else 'N/A'}")
+            owner = ClinicMembership.objects.filter(clinic=clinic, role=ClinicMembership.Role.OWNER).first()
+            self.stdout.write(f"   Owner Email: {owner.user.email if owner else 'N/A'}")
             self.stdout.write(f"   Phone: {clinic.phone_number or 'N/A'}")
             self.stdout.write(f"   WhatsApp: {clinic.whatsapp_number or 'N/A'}")
             
@@ -295,7 +295,7 @@ class Command(BaseCommand):
         self.stdout.write("=" * 60 + "\n")
         
         from apps.appointments.models import Appointment
-        from apps.leads.models import Conversation
+        from apps.conversations.models import Conversation
         
         # Recent appointments
         recent_appointments = Appointment.objects.filter(
@@ -392,4 +392,5 @@ class Command(BaseCommand):
             self.stdout.write("   5. أضف Message Templates")
         
         self.stdout.write("\n" + "=" * 60 + "\n")
+
 

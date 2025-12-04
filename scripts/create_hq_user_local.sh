@@ -57,3 +57,4 @@ echo "You can now login at: http://localhost:3000/login"
 echo "Email: $EMAIL"
 echo "Password: $PASSWORD"
 
+

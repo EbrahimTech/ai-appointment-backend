@@ -100,6 +100,9 @@ class WhatsAppService:
             to_phone = outbox.conversation.patient.phone_number
         elif outbox.payload.get("to"):
             to_phone = outbox.payload.get("to")
+        elif outbox.metadata and outbox.metadata.get("sandbox_to"):
+            # For test messages, check metadata
+            to_phone = outbox.metadata.get("sandbox_to")
         
         if not to_phone:
             return WhatsAppMessageResult(

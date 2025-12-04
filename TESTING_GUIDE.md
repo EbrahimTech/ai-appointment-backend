@@ -10,6 +10,415 @@
 
 ---
 
+## 🎯 الخطوات المتبقية للانطلاق
+
+### 📌 الوضع الحالي
+
+**ما تم إنجازه:**
+- ✅ Services: موجودة (2 خدمة)
+- ✅ Operating Hours: معرّفة (15 ساعة عمل)
+- ✅ Message Templates: موجودة (10 قوالب)
+- ✅ DeepSeek AI: جاهز
+- ✅ Google Calendar OAuth: معرّف في `.env`
+- ✅ Google Calendar: متصل للعيادة (Status: OK)
+- ✅ WhatsApp Channel: تم إضافته (Provider: meta, Phone Number ID موجود)
+
+**ما تبقى للاختبار الكامل:**
+
+#### ✅ الخطوة 1: إضافة رقم WhatsApp إلى Allowlist (مهم!)
+**المشكلة:** عند النقر على "Send Test" يظهر خطأ: "This phone number is not in the sandbox allowlist"
+
+**الحل:**
+1. افتح ملف `.env`
+2. ابحث عن `WHATSAPP_TEST_ALLOWLIST`
+3. أضف رقمك بالتنسيق التالي:
+   ```env
+   WHATSAPP_TEST_ALLOWLIST={"prime-dental":["+905356027135"]}
+   ```
+   أو لجميع العيادات:
+   ```env
+   WHATSAPP_TEST_ALLOWLIST={"*":["+905356027135"]}
+   ```
+4. أعد تشغيل الـ backend:
+   ```bash
+   docker-compose restart web
+   ```
+
+#### ✅ الخطوة 2: تشغيل Migration (مهم!)
+```bash
+docker-compose exec web python manage.py migrate channels
+```
+**السبب:** زيادة طول `access_token` من 255 إلى 1000 حرف
+
+#### ✅ الخطوة 3: إعداد WhatsApp Webhook في Meta
+- للاختبار المحلي: استخدم **ngrok** لعرض webhook
+- للإنتاج: استخدم domain حقيقي مع SSL
+- Webhook URL: `https://your-domain.com/channels/whatsapp/webhook?clinic=prime-dental`
+
+#### ✅ الخطوة 4: الاختبار الفعلي
+- اختبار الإرسال: استخدم "Send Test" من صفحة Integrations (بعد إضافة الرقم)
+- اختبار الاستقبال: أرسل رسالة WhatsApp إلى رقم العيادة
+- اختبار حجز موعد: أرسل "أريد حجز موعد" من WhatsApp
+- التحقق من Google Calendar: تأكد من ظهور الموعد بعد الحجز
+
+---
+
+### الخطوة 1: حل مشكلة Google Calendar OAuth
+
+#### المشكلة:
+عند محاولة ربط Google Calendar، تظهر رسالة:
+> "access_denied: لم يكمل تطبيق AI Appointment Setter عملية التحقق"
+
+#### الحل: إضافة Test Users في Google Cloud Console
+
+1. اذهب إلى: https://console.cloud.google.com/
+2. اختر المشروع الخاص بك
+3. اذهب إلى: **APIs & Services** → **OAuth consent screen**
+4. تأكد من أن **Publishing status** = **Testing**
+5. اذهب إلى قسم **Test users** (في نفس الصفحة)
+6. اضغط **+ ADD USERS**
+7. أضف البريد الإلكتروني: `ebrahimtech1@gmail.com`
+8. أضف أي حسابات Google أخرى ستستخدمها للعيادات
+9. اضغط **ADD** ثم **SAVE**
+
+**⚠️ مهم:** يجب إضافة جميع الحسابات التي ستستخدمها قبل محاولة الربط.
+
+#### بعد إضافة Test Users:
+
+1. اذهب إلى: `/c/prime-dental/integrations`
+2. اضغط **"Connect Google Calendar"**
+3. سجل دخول بحساب Google (يجب أن يكون في قائمة Test Users)
+4. وافق على الصلاحيات المطلوبة
+5. سيتم إرجاعك تلقائياً إلى النظام
+
+**التحقق:**
+```bash
+docker-compose exec web python manage.py shell -c "
+from apps.calendars.models import GoogleCredential
+from apps.clinics.models import Clinic
+
+clinic = Clinic.objects.get(slug='prime-dental')
+cred = GoogleCredential.objects.filter(clinic=clinic).first()
+if cred:
+    print(f'✅ Google Calendar متصل')
+    print(f'   Account: {cred.account_email}')
+else:
+    print('❌ Google Calendar غير متصل')
+"
+```
+
+---
+
+### الخطوة 2: إضافة WhatsApp Channel (Meta Cloud API)
+
+#### 2.1 الحصول على بيانات WhatsApp من Meta
+
+**من Meta Business Manager:**
+1. اذهب إلى: https://business.facebook.com/
+2. اختر **WhatsApp** → **API Setup**
+3. انسخ:
+   - **Phone Number ID** (مثال: `123456789012345`)
+   - **Access Token** (مثال: `EAAxxxxxxxxxxxxx`)
+
+**ملاحظة:** إذا لم يكن لديك WhatsApp Business Account:
+- سجل في Meta Business Manager
+- أنشئ WhatsApp Business App
+- احصل على Phone Number ID و Access Token
+
+#### 2.2 إضافة WhatsApp Channel في النظام
+
+1. من Clinic Portal: `/c/prime-dental/integrations`
+2. في قسم **WhatsApp Integration**، اضغط **"Add WhatsApp Channel"** (أو **"Update WhatsApp Channel"** إذا كان موجود)
+3. املأ البيانات التالية:
+   - **Provider**: اختر **Meta** (أو Facebook)
+   - **Phone Number ID**: أدخل Phone Number ID من Meta Business Manager (مثال: `123456789012345`)
+   - **Access Token**: أدخل Access Token من Meta Business Manager (مثال: `EAAxxxxxxxxxxxxx`)
+   - **Business Account ID**: (اختياري) إذا كان لديك Business Account ID
+   - **API Version**: اتركه `v18.0` (أو غيره حسب إعداداتك)
+4. اضغط **"حفظ"**
+
+**⚠️ ملاحظة:** Access Token سيتم إخفاؤه بعد الحفظ لأسباب أمنية.
+
+**التحقق:**
+```bash
+docker-compose exec web python manage.py shell -c "
+from apps.channels.models import ChannelAccount, ChannelType
+from apps.clinics.models import Clinic
+
+clinic = Clinic.objects.get(slug='prime-dental')
+account = ChannelAccount.objects.filter(
+    clinic=clinic,
+    channel=ChannelType.WHATSAPP
+).first()
+if account:
+    metadata = account.metadata or {}
+    print(f'✅ WhatsApp متصل')
+    print(f'   Provider: {account.provider_name}')
+    print(f'   Phone ID: {metadata.get(\"phone_number_id\", \"N/A\")}')
+else:
+    print('❌ WhatsApp غير متصل')
+"
+```
+
+**النتيجة:**
+- ✅ WhatsApp Channel متصل
+- ✅ يمكن استقبال وإرسال رسائل WhatsApp
+
+---
+
+### الخطوة 3: تشغيل Migration (مهم!)
+
+**قبل الاختبار، يجب تشغيل migration لزيادة طول `access_token`:**
+
+```bash
+docker-compose exec web python manage.py migrate channels
+```
+
+**النتيجة المتوقعة:**
+```
+Running migrations:
+  Applying channels.0003_increase_access_token_length... OK
+```
+
+**⚠️ مهم:** إذا لم يتم تشغيل هذه Migration، قد تواجه خطأ عند حفظ Access Token الطويل.
+
+---
+
+### الخطوة 4: إعداد WhatsApp Webhook في Meta (للاستقبال)
+
+**للاستقبال رسائل WhatsApp، يجب إعداد Webhook في Meta:**
+
+#### 4.1 للاختبار المحلي (باستخدام ngrok):
+
+1. **قم بتثبيت ngrok:**
+   ```bash
+   # Windows: قم بتحميل ngrok من https://ngrok.com/
+   # أو استخدم Chocolatey: choco install ngrok
+   ```
+
+2. **شغّل ngrok:**
+   ```bash
+   ngrok http 8000
+   ```
+   ستحصل على URL مثل: `https://abc123.ngrok.io`
+
+3. **في Meta Business Manager:**
+   - اذهب إلى: https://business.facebook.com/
+   - اختر **WhatsApp** → **Configuration** → **Webhooks**
+   - اضغط **Edit** أو **Add Webhook**
+   - أدخل **Webhook URL**:
+     ```
+     https://abc123.ngrok.io/channels/whatsapp/webhook?clinic=prime-dental
+     ```
+   - أدخل **Verify Token** (يمكنك اختيار أي token، مثال: `my_verify_token`)
+   - اختر **Events**:
+     - ✅ `messages` (للاستقبال)
+     - ✅ `message_deliveries` (للتأكيد)
+   - اضغط **Save**
+
+#### 4.2 للإنتاج (مع Domain حقيقي):
+
+1. **تأكد من أن Domain يعمل مع SSL (HTTPS)**
+2. **في Meta Business Manager:**
+   - أدخل **Webhook URL**:
+     ```
+     https://your-domain.com/channels/whatsapp/webhook?clinic=prime-dental
+     ```
+   - باقي الخطوات نفس الاختبار المحلي
+
+**⚠️ ملاحظات مهمة:**
+- **Webhook URL يجب أن يكون HTTPS** (Meta يتطلب SSL)
+- **Query Parameter `clinic=prime-dental`** ضروري لتحديد العيادة
+- **Verify Token** يمكنك اختيار أي قيمة (Meta سيتحقق منه)
+- **للاختبار المحلي:** استخدم ngrok أو Cloudflare Tunnel
+- **للإنتاج:** استخدم domain حقيقي مع SSL certificate
+
+---
+
+### الخطوة 5: التحقق النهائي من إعداد العيادة
+
+```bash
+# تحقق شامل من العيادة
+docker-compose exec web python manage.py check_setup
+```
+
+**النتيجة المتوقعة:**
+```
+🏥 العيادة: Prime Dental Clinic (prime-dental)
+
+✅ Services: 2 خدمة
+✅ Operating Hours: 15 ساعة عمل
+✅ Message Templates: 10 قالب
+✅ WhatsApp: متصل (meta)
+✅ Google Calendar: متصل (ebrahimtech1@gmail.com)
+
+🎉 العيادة جاهزة بالكامل!
+```
+
+---
+
+### الخطوة 6: الاختبار النهائي والانطلاق
+
+#### 6.1 اختبار WhatsApp (إرسال واستقبال)
+
+**أ) اختبار الإرسال (Sandbox):**
+
+**⚠️ مهم: قبل الاختبار، يجب إضافة رقمك إلى `WHATSAPP_TEST_ALLOWLIST` في `.env`:**
+
+1. **افتح ملف `.env`**
+2. **ابحث عن `WHATSAPP_TEST_ALLOWLIST`**
+3. **أضف رقمك بالتنسيق التالي:**
+   ```env
+   WHATSAPP_TEST_ALLOWLIST={"prime-dental":["+905356027135"],"*":["+15555550123"]}
+   ```
+   أو لجميع العيادات:
+   ```env
+   WHATSAPP_TEST_ALLOWLIST={"*":["+905356027135","+15555550123"]}
+   ```
+4. **أعد تشغيل الـ backend:**
+   ```bash
+   docker-compose restart web
+   ```
+
+**بعد إضافة الرقم:**
+1. من Clinic Portal: `/c/prime-dental/integrations`
+2. في قسم **WhatsApp Integration**، استخدم **"Send Test"**
+3. أدخل:
+   - **Sandbox Phone**: `+905356027135` (أو أي رقم في القائمة)
+   - **Template Key**: `greet`
+   - **Variables**: `{"first_name":"Test"}`
+     ⚠️ **مهم:** قالب `greet` يحتاج `first_name` وليس `name`
+4. اضغط **"Send Test"**
+5. **النتيجة المتوقعة:**
+   - ✅ الرسالة تُرسل بنجاح
+   - ✅ Status يصبح "SENT" أو "DELIVERED"
+
+**⚠️ إذا ظهر "DOWN" و "FAILED":**
+
+**التفسير:**
+- **"DOWN"** = حالة WhatsApp Integration (القناة العامة)
+  - يظهر عندما يكون آخر إرسال فاشلاً
+  - سيصبح `OK` بعد نجاح إرسال جديد
+- **"FAILED"** = حالة الرسالة الفردية
+  - الرسالة القديمة فشلت قبل التعديلات
+  - لن تُعالج تلقائياً
+
+**⚠️ إذا ظهر خطأ "Session has expired" أو "Access Token expired":**
+
+**المشكلة:** Access Token من Meta منتهي الصلاحية.
+
+**الحل:**
+1. **احصل على Access Token جديد من Meta Business Manager:**
+   - اذهب إلى: https://business.facebook.com/
+   - اختر **WhatsApp** → **API Setup**
+   - انسخ **Access Token** الجديد
+
+2. **حدّث WhatsApp Channel في النظام:**
+   - اذهب إلى `/c/prime-dental/integrations`
+   - اضغط **"Update WhatsApp Channel"**
+   - أدخل **Access Token** الجديد
+   - احفظ
+
+3. **أرسل رسالة اختبار جديدة:**
+   - اضغط "Send Test" مرة أخرى
+   - انتظر 10-30 ثانية
+   - اضغط "Refresh Status"
+   - يجب أن تتغير الحالة من `FAILED` إلى `SENT` أو `DELIVERED`
+   - يجب أن تتغير حالة Integration من `DOWN` إلى `OK`
+
+**ملاحظة:** Access Token من Meta ينتهي بعد فترة (عادة 60 يوم). يجب تحديثه دورياً.
+
+**إذا استمرت المشكلة:**
+1. **تحقق من حالة Worker:**
+   ```bash
+   docker-compose ps worker beat
+   ```
+
+2. **مراقبة Logs:**
+   ```bash
+   # Logs للـ Worker
+   docker-compose logs -f worker
+   
+   # Logs للـ Beat (Scheduler)
+   docker-compose logs -f beat
+   ```
+
+3. **تحقق من الإعدادات:**
+   - `Access Token` صحيح في WhatsApp Channel
+   - `Phone Number ID` صحيح
+   - الرقم في `WHATSAPP_TEST_ALLOWLIST`
+
+**ملاحظة:** لكل قالب متغيرات مختلفة:
+- `greet` → `{"first_name":"Test"}`
+- `session_clarify` → `{"name":"Test"}`
+- `slot_offer` → `{"slot1":"10:00","slot2":"14:00"}`
+- `confirm_booking` → `{"dt":"2024-01-15 10:00"}`
+
+**ب) اختبار الاستقبال (Webhook):**
+1. أرسل رسالة WhatsApp إلى رقم العيادة (Phone Number ID) من هاتفك
+2. **النتيجة المتوقعة:**
+   - ✅ استقبال الرسالة في النظام (من `/c/prime-dental/conversations`)
+   - ✅ رد تلقائي من AI (DeepSeek)
+   - ✅ AI يفهم الرسالة ويقترح المواعيد
+
+#### 6.2 اختبار حجز موعد كامل
+
+1. من WhatsApp، أرسل: "أريد حجز موعد" أو "I want to book an appointment"
+2. **النتيجة المتوقعة:**
+   - ✅ AI يعرض الخدمات المتاحة
+   - ✅ AI يعرض المواعيد المتاحة
+   - ✅ يمكنك اختيار موعد
+   - ✅ يتم تأكيد الموعد
+   - ✅ رسالة تأكيد تُرسل عبر WhatsApp
+
+#### 6.3 اختبار Google Calendar
+
+1. بعد حجز الموعد، افتح Google Calendar
+2. **النتيجة المتوقعة:**
+   - ✅ الموعد ظاهر في Google Calendar
+   - ✅ التاريخ والوقت صحيحان
+   - ✅ اسم الخدمة موجود
+   - ✅ اسم المريض موجود (إن كان متوفر)
+
+#### 6.4 مراقبة النظام
+
+**عرض Logs:**
+```bash
+# Logs للـ Backend
+docker-compose logs -f web
+
+# Logs للـ Worker (Celery)
+docker-compose logs -f worker
+```
+
+**مراقبة المحادثات:**
+- من Clinic Portal: `/c/prime-dental/conversations`
+- يمكنك رؤية جميع المحادثات مع العملاء
+
+**مراقبة المواعيد:**
+- من Clinic Portal: `/c/prime-dental/appointments`
+- يمكنك رؤية جميع المواعيد وإدارتها
+
+---
+
+## 🎉 الانطلاق! العيادة جاهزة
+
+**الآن يمكنك:**
+- ✅ استقبال رسائل WhatsApp من العملاء
+- ✅ الرد التلقائي عبر AI (DeepSeek)
+- ✅ حجز المواعيد تلقائياً
+- ✅ المزامنة مع Google Calendar
+- ✅ إدارة المواعيد من Clinic Portal
+
+**الخطوة التالية:** 
+- كرر الخطوات لإضافة عيادات أخرى
+- راقب الأداء من `/c/prime-dental/conversations`
+- راقب المواعيد من `/c/prime-dental/appointments`
+
+**🚀 المشروع جاهز للاستخدام الحقيقي!**
+
+---
+
 ## ✅ ما تم إعداده في `.env`
 
 ### 1. Environment Variables الأساسية
