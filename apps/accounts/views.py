@@ -1725,6 +1725,9 @@ def _whatsapp_channel_status(clinic: Clinic) -> dict:
             "last_success_at": None,
             "last_error_at": None,
             "provider": None,
+            "phone_number_id": None,
+            "business_account_id": None,
+            "api_version": None,
         }
     last_success = (
         OutboxMessage.objects.filter(
@@ -1749,11 +1752,16 @@ def _whatsapp_channel_status(clinic: Clinic) -> dict:
         status = "OK"
     elif last_error and (not last_success or last_error.updated_at >= last_success.updated_at):
         status = "DOWN"
+    
+    metadata = account.metadata or {}
     return {
         "status": status,
         "last_success_at": last_success.updated_at.isoformat() if last_success else None,
         "last_error_at": last_error.updated_at.isoformat() if last_error else None,
         "provider": account.provider_name,
+        "phone_number_id": metadata.get("phone_number_id"),
+        "business_account_id": metadata.get("business_account_id"),
+        "api_version": metadata.get("api_version", "v18.0"),
     }
 
 
@@ -2205,7 +2213,19 @@ class ClinicWhatsAppStatusView(APIView):
             business_account_id = str(payload.get("business_account_id", "")).strip()
             api_version = str(payload.get("api_version", "v18.0")).strip()
             
-            if not provider or not phone_number_id or not access_token:
+            if not provider or not phone_number_id:
+                return error_response("INVALID_PAYLOAD", status_code=400)
+            
+            # Get existing account if it exists
+            existing_account = ChannelAccount.objects.filter(
+                clinic=clinic,
+                channel=ChannelType.WHATSAPP
+            ).first()
+            
+            # If access_token is empty and account exists, keep the old one
+            if not access_token and existing_account:
+                access_token = existing_account.access_token
+            elif not access_token:
                 return error_response("INVALID_PAYLOAD", status_code=400)
             
             # Create or update channel account
@@ -2233,6 +2253,7 @@ class ClinicWhatsAppStatusView(APIView):
                     "provider": provider,
                     "phone_number_id": phone_number_id,
                     "created": created,
+                    "token_updated": bool(payload.get("access_token", "").strip()),
                 },
             )
             

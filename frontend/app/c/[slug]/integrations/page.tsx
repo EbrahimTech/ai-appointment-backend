@@ -11,6 +11,9 @@ type WhatsAppStatus = {
   last_success_at: string | null;
   last_error_at: string | null;
   provider: string | null;
+  phone_number_id: string | null;
+  business_account_id: string | null;
+  api_version: string | null;
 };
 
 type GoogleStatus = {
@@ -79,6 +82,16 @@ export default function ClinicIntegrationsPage() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [configSuccess, setConfigSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Load existing WhatsApp config when data is available
+  useEffect(() => {
+    if (whatsapp) {
+      setProvider(whatsapp.provider || "meta");
+      setPhoneNumberId(whatsapp.phone_number_id || "");
+      setBusinessAccountId(whatsapp.business_account_id || "");
+      setApiVersion(whatsapp.api_version || "v18.0");
+    }
+  }, [whatsapp]);
 
   useEffect(() => {
     if (!outboxId) {
@@ -303,7 +316,7 @@ export default function ClinicIntegrationsPage() {
 
           <div className="grid gap-4 md:grid-cols-3 mb-6">
           <InfoRow label="Provider" value={whatsapp?.provider} />
-            <InfoRow label="Phone Number ID" value={whatsapp?.provider ? "856686610867517" : "—"} />
+            <InfoRow label="Phone Number ID" value={whatsapp?.phone_number_id} />
             <InfoRow label="Last Success" value={whatsapp?.last_success_at} />
         </div>
 
@@ -374,13 +387,17 @@ export default function ClinicIntegrationsPage() {
                 </label>
                 <input
                   id="access-token"
-                  type="text"
+                  type="password"
                   value={accessToken}
                   onChange={(e) => setAccessToken(e.target.value)}
-                  placeholder="EAAxxxxxxxxxxxxx"
+                  placeholder={whatsapp?.provider ? "••••••••••••••••" : "EAAxxxxxxxxxxxxx"}
                   className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  required
                 />
+                {whatsapp?.provider && !accessToken && (
+                  <p className="text-xs text-gray-500">
+                    Access Token موجود. أدخل Token جديد فقط إذا أردت تحديثه.
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">

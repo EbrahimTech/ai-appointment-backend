@@ -96,7 +96,10 @@ class WhatsAppService:
         
         # Get recipient phone number
         to_phone = None
-        if outbox.conversation and outbox.conversation.patient:
+        # Check metadata first (for sandbox/test messages)
+        if outbox.metadata and outbox.metadata.get("sandbox_to"):
+            to_phone = outbox.metadata.get("sandbox_to")
+        elif outbox.conversation and outbox.conversation.patient:
             to_phone = outbox.conversation.patient.phone_number
         elif outbox.payload.get("to"):
             to_phone = outbox.payload.get("to")
