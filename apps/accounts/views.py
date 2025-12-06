@@ -903,6 +903,67 @@ class ClinicTemplateListView(APIView):
             ClinicMembership.Role.ADMIN,
         ]
     )
+    def post(self, request, slug: str):
+        """Create a new template."""
+        clinic: Clinic = request.clinic
+        payload = request.data or {}
+        
+        code = str(payload.get("code", "")).strip()
+        language = str(payload.get("language", "en")).strip()
+        body = str(payload.get("body", "")).strip()
+        hsm_name = str(payload.get("hsm_name", "")).strip()
+        variables = payload.get("variables", [])
+        
+        if not code or not body:
+            return error_response("INVALID_PAYLOAD", status_code=400)
+        
+        # Check if template already exists
+        existing = clinic.message_templates.filter(code=code, language=language).first()
+        if existing:
+            return error_response("TEMPLATE_EXISTS", status_code=400)
+        
+        # Create new template
+        template = MessageTemplate.objects.create(
+            clinic=clinic,
+            code=code,
+            language=language,
+            body=body,
+            category=TemplateCategory.WHATSAPP,
+            is_active=True,
+            variables=variables if isinstance(variables, list) else [],
+            metadata={
+                "hsm_name": hsm_name or code,
+            }
+        )
+        
+        AuditLog.objects.create(
+            actor_user=request.user if request.user.is_authenticated else None,
+            action="TEMPLATE_CREATE",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta={
+                "template_code": code,
+                "language": language,
+            },
+        )
+        
+        return ok_response({
+            "template": {
+                "key": template.code,
+                "lang": template.language,
+                "channel": "whatsapp",
+                "hsm": False,  # Not approved yet in Meta
+                "variables": template.variables or [],
+                "enabled": template.is_active,
+            }
+        })
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
     def put(self, request, slug: str):
         clinic: Clinic = request.clinic
         payload = request.data or {}

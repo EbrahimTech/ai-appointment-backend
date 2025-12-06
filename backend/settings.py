@@ -246,6 +246,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.workers.tasks.sweep_tentative_google_syncs",
         "schedule": timedelta(seconds=CELERY_SWEEP_TENTATIVE_SECONDS),
     },
+    "dispatch-outbox-messages": {
+        "task": "apps.workers.tasks.dispatch_outbox_messages",
+        "schedule": timedelta(seconds=10),  # Run every 10 seconds
+    },
 }
 
 SUPPORT_SESSION_MINUTES = int(os.getenv("SUPPORT_SESSION_MINUTES", "15"))

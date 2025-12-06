@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupportSession } from "../../../providers";
 import { z } from "zod";
-import { FileText, Search, Globe, RefreshCw, Eye, ToggleLeft, ToggleRight, X, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
+import { FileText, Search, Globe, RefreshCw, Eye, ToggleLeft, ToggleRight, X, CheckCircle2, XCircle, AlertCircle, Plus } from "lucide-react";
 
 type TemplateItem = {
   key: string;
@@ -40,6 +40,14 @@ export default function TemplatesPage() {
   const [error, setError] = useState<string | null>(null);
   const [previewRequest, setPreviewRequest] = useState<{ template_key: string; variables?: Record<string, string> } | null>(null);
   const [previewResult, setPreviewResult] = useState<string | null>(null);
+
+  // Add Template states
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newTemplateCode, setNewTemplateCode] = useState("");
+  const [newTemplateLanguage, setNewTemplateLanguage] = useState("en");
+  const [newTemplateBody, setNewTemplateBody] = useState("");
+  const [newTemplateHsmName, setNewTemplateHsmName] = useState("");
+  const [newTemplateVariables, setNewTemplateVariables] = useState("");
 
   const templatesQuery = useQuery({
     queryKey: ["templates", slug, lang, search],
@@ -104,6 +112,37 @@ export default function TemplatesPage() {
     },
   });
 
+  const createMutation = useMutation({
+    mutationFn: async (payload: { code: string; language: string; body: string; hsm_name?: string; variables?: string[] }) => {
+      const response = await fetch(`/api/proxy/clinic/${slug}/templates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "CREATE_FAILED");
+      }
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["templates", slug, lang, search] });
+      setFeedback("Template created successfully.");
+      setError(null);
+      setShowAddModal(false);
+      // Reset form
+      setNewTemplateCode("");
+      setNewTemplateLanguage("en");
+      setNewTemplateBody("");
+      setNewTemplateHsmName("");
+      setNewTemplateVariables("");
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+      setFeedback(null);
+    },
+  });
+
   const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data]);
 
   function toggleTemplate(template: TemplateItem, enabled: boolean) {
@@ -135,6 +174,29 @@ export default function TemplatesPage() {
     };
     setPreviewRequest(payload);
     previewMutation.mutate(payload);
+  }
+
+  function handleCreateTemplate(event: React.FormEvent) {
+    event.preventDefault();
+    if (readOnly) {
+      setError("Cannot create templates while impersonating. End support session first.");
+      return;
+    }
+
+    const variables = newTemplateVariables
+      .split(",")
+      .map((v) => v.trim())
+      .filter((v) => v);
+
+    const payload = {
+      code: newTemplateCode.trim(),
+      language: newTemplateLanguage,
+      body: newTemplateBody.trim(),
+      hsm_name: newTemplateHsmName.trim() || undefined,
+      variables: variables.length > 0 ? variables : undefined,
+    };
+
+    createMutation.mutate(payload);
   }
 
   if (templatesQuery.isPending) {
@@ -187,15 +249,26 @@ export default function TemplatesPage() {
                 <p className="text-sm text-gray-600">Manage WhatsApp templates for automated replies</p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => templatesQuery.refetch()}
-              disabled={templatesQuery.isFetching}
-              className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors shadow-sm"
-            >
-              <RefreshCw className={`w-4 h-4 ${templatesQuery.isFetching ? "animate-spin" : ""}`} />
-              <span>Refresh</span>
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowAddModal(true)}
+                disabled={readOnly}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Template</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => templatesQuery.refetch()}
+                disabled={templatesQuery.isFetching}
+                className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                <RefreshCw className={`w-4 h-4 ${templatesQuery.isFetching ? "animate-spin" : ""}`} />
+                <span>Refresh</span>
+              </button>
+            </div>
           </div>
 
           {/* Filters */}
@@ -422,6 +495,129 @@ export default function TemplatesPage() {
             </div>
           ) : null}
         </div>
+        )}
+
+        {/* Add Template Modal */}
+        {showAddModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">Add New Template</h2>
+                    <p className="text-sm text-gray-600 mt-1">Create a new WhatsApp message template</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreateTemplate} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700" htmlFor="template-code">
+                        Template Code <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="template-code"
+                        type="text"
+                        value={newTemplateCode}
+                        onChange={(e) => setNewTemplateCode(e.target.value)}
+                        placeholder="hello_world"
+                        className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                        required
+                      />
+                      <p className="text-xs text-gray-500">Lowercase, no spaces (e.g., greet, hello_world)</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700" htmlFor="template-language">
+                        Language <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        id="template-language"
+                        value={newTemplateLanguage}
+                        onChange={(e) => setNewTemplateLanguage(e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                        required
+                      >
+                        <option value="en">English</option>
+                        <option value="ar">Arabic</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700" htmlFor="template-body">
+                      Template Body <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      id="template-body"
+                      value={newTemplateBody}
+                      onChange={(e) => setNewTemplateBody(e.target.value)}
+                      placeholder="Hello {{first_name}}, welcome to our clinic!"
+                      rows={6}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors font-mono"
+                      required
+                    />
+                    <p className="text-xs text-gray-500">Use {`{{variable_name}}`} for variables</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700" htmlFor="template-hsm">
+                      HSM Template Name
+                    </label>
+                    <input
+                      id="template-hsm"
+                      type="text"
+                      value={newTemplateHsmName}
+                      onChange={(e) => setNewTemplateHsmName(e.target.value)}
+                      placeholder="hello_world (optional - same as Template Code if empty)"
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                    />
+                    <p className="text-xs text-gray-500">Name of the template in Meta Business Manager (if different)</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700" htmlFor="template-variables">
+                      Variables
+                    </label>
+                    <input
+                      id="template-variables"
+                      type="text"
+                      value={newTemplateVariables}
+                      onChange={(e) => setNewTemplateVariables(e.target.value)}
+                      placeholder="first_name, last_name, date"
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                    />
+                    <p className="text-xs text-gray-500">Comma-separated list of variable names (optional)</p>
+                  </div>
+
+                  <div className="flex items-center gap-3 pt-4">
+                    <button
+                      type="submit"
+                      disabled={createMutation.isPending}
+                      className="flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{createMutation.isPending ? "Creating..." : "Create Template"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddModal(false)}
+                      className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
