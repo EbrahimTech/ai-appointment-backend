@@ -2187,6 +2187,71 @@ class ClinicWhatsAppStatusView(APIView):
         data = _whatsapp_channel_status(clinic)
         return ok_response(data)
 
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def put(self, request, slug: str):
+        """Create or update WhatsApp channel configuration."""
+        clinic: Clinic = request.clinic
+        payload = request.data or {}
+        
+        try:
+            provider = str(payload.get("provider", "meta")).strip().lower()
+            phone_number_id = str(payload.get("phone_number_id", "")).strip()
+            access_token = str(payload.get("access_token", "")).strip()
+            business_account_id = str(payload.get("business_account_id", "")).strip()
+            api_version = str(payload.get("api_version", "v18.0")).strip()
+            
+            if not provider or not phone_number_id or not access_token:
+                return error_response("INVALID_PAYLOAD", status_code=400)
+            
+            # Create or update channel account
+            channel_account, created = ChannelAccount.objects.update_or_create(
+                clinic=clinic,
+                channel=ChannelType.WHATSAPP,
+                defaults={
+                    "provider_name": provider,
+                    "access_token": access_token,
+                    "refresh_token": "",
+                    "metadata": {
+                        "phone_number_id": phone_number_id,
+                        "business_account_id": business_account_id,
+                        "api_version": api_version,
+                    },
+                }
+            )
+            
+            AuditLog.objects.create(
+                actor_user=request.user if request.user.is_authenticated else None,
+                action="WHATSAPP_CONFIG_UPDATE",
+                scope=AuditLog.Scope.CLINIC,
+                clinic=clinic,
+                meta={
+                    "provider": provider,
+                    "phone_number_id": phone_number_id,
+                    "created": created,
+                },
+            )
+            
+            return ok_response({
+                "message": "WhatsApp channel configuration saved successfully",
+                "created": created,
+            })
+            
+        except Exception as exc:
+            logger.error(
+                "Failed to save WhatsApp configuration",
+                extra={
+                    "clinic_id": clinic.id,
+                    "error": str(exc),
+                },
+                exc_info=True,
+            )
+            return error_response("INTERNAL_ERROR", status_code=500)
+
 
 class ClinicWhatsAppTestView(APIView):
     """Send a sandbox WhatsApp test message."""
