@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupportSession } from "../../../providers";
 import { z } from "zod";
-import { Users, UserPlus, RefreshCw, Search, Edit, Trash2, X, CheckCircle2, XCircle, Eye, Calendar, Phone, Mail, MapPin, Heart, FileText, User, AlertTriangle } from "lucide-react";
+import { Users, UserPlus, RefreshCw, Search, Edit, Trash2, X, CheckCircle2, XCircle, Eye, Calendar, Phone, Mail, MapPin, Heart, FileText, User, AlertTriangle, Copy, Check } from "lucide-react";
 
 type Patient = {
   id: number;
@@ -95,6 +95,9 @@ export default function PatientsPage() {
   
   // Delete confirmation state
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ id: number; name: string } | null>(null);
+  
+  // Copy ID state
+  const [copiedId, setCopiedId] = useState(false);
 
   const patientsQuery = useQuery({
     queryKey: ["patients", slug, search],
@@ -292,6 +295,12 @@ export default function PatientsPage() {
   function cancelDelete() {
     setDeleteConfirmation(null);
   }
+  
+  function copyPatientId(id: number) {
+    navigator.clipboard.writeText(id.toString());
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2000);
+  }
 
   function humanizeError(code: string): string {
     const errors: Record<string, string> = {
@@ -422,6 +431,9 @@ export default function PatientsPage() {
                 <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                   <tr>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      ID
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                       Name
                     </th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -444,6 +456,13 @@ export default function PatientsPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {patients.map((patient) => (
                     <tr key={patient.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="inline-flex items-center gap-2">
+                          <span className="text-xs font-mono font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md">
+                            #{patient.id}
+                          </span>
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-semibold text-gray-900">{patient.full_name}</div>
                         {patient.email && (
@@ -880,6 +899,32 @@ export default function PatientsPage() {
                 <div className="bg-gray-50 rounded-lg p-4">
                   <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Basic Information</h3>
                   <div className="grid grid-cols-2 gap-4">
+                    <div className="col-span-2">
+                      <p className="text-xs text-gray-500 mb-1.5">Patient ID</p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-mono font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-md">
+                          #{viewingPatient.id}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => copyPatientId(viewingPatient.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-200 transition-colors"
+                          title="Copy Patient ID"
+                        >
+                          {copiedId ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-green-600" />
+                              <span className="text-green-600">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copy ID</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
                     <div>
                       <p className="text-xs text-gray-500">Date of Birth</p>
                       <p className="text-sm font-medium text-gray-900">
