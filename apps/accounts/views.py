@@ -336,7 +336,7 @@ class ClinicAppointmentListView(APIView):
         to_dt = _parse_clinic_iso_datetime(params.get("to"), clinic)
 
         records = list(
-            clinic.appointments.select_related("service").order_by("created_at", "id")
+            clinic.appointments.select_related("service", "patient").order_by("created_at", "id")
         )
 
         if from_dt:
@@ -498,7 +498,6 @@ class ClinicAppointmentRescheduleView(APIView):
         with transaction.atomic():
             appointment = (
                 Appointment.objects.select_for_update()
-                .select_related("service", "patient", "calendar_event")
                 .filter(clinic=clinic, id=appointment_id)
                 .first()
             )
@@ -607,7 +606,6 @@ class ClinicAppointmentCancelView(APIView):
         with transaction.atomic():
             appointment = (
                 Appointment.objects.select_for_update()
-                .select_related("calendar_event")
                 .filter(clinic=clinic, id=appointment_id)
                 .first()
             )
@@ -1658,6 +1656,8 @@ def _serialize_appointment(appointment: Appointment) -> Dict[str, object]:
     return {
         "id": appointment.id,
         "service_code": appointment.service.code if appointment.service else "",
+        "patient_name": appointment.patient.full_name if appointment.patient else "",
+        "patient_id": appointment.patient.id if appointment.patient else None,
         "start_at": appointment.start_at.isoformat() if appointment.start_at else None,
         "end_at": appointment.end_at.isoformat() if appointment.end_at else None,
         "status": appointment.status,

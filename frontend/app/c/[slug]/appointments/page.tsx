@@ -5,11 +5,27 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupportSession } from "../../../providers";
 import { z } from "zod";
-import { Calendar, RefreshCw, Plus, Edit, XCircle, Filter, AlertCircle, CheckCircle2, X, Search, Info, Clock } from "lucide-react";
+import {
+  Calendar,
+  RefreshCw,
+  Plus,
+  Edit,
+  XCircle,
+  Filter,
+  AlertCircle,
+  CheckCircle2,
+  X,
+  Search,
+  Info,
+  Clock,
+  AlertTriangle,
+} from "lucide-react";
 
 type Appointment = {
   id: number;
   service_code: string;
+  patient_name?: string;
+  patient_id?: number | null;
   start_at: string;
   end_at: string;
   status: string;
@@ -67,6 +83,7 @@ export default function AppointmentsPage() {
   const [serviceSearch, setServiceSearch] = useState("");
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [showServiceDropdown, setShowServiceDropdown] = useState(false);
+  const [cancelConfirmation, setCancelConfirmation] = useState<number | null>(null);
 
   const servicesQuery = useQuery({
     queryKey: ["services", slug],
@@ -171,6 +188,7 @@ export default function AppointmentsPage() {
       queryClient.invalidateQueries({ queryKey: ["appointments", slug] });
       setFeedback("Appointment cancelled.");
       setError(null);
+      setCancelConfirmation(null);
     },
     onError: (err: Error) => {
       setError(humanizeError(err.message));
@@ -270,8 +288,25 @@ export default function AppointmentsPage() {
       setFeedback(null);
       return;
     }
-    cancelMutation.mutate(parsed.data);
-    event.currentTarget.reset();
+    // Prevent repeated cancellation on the same appointment
+    const existing = appointments.find((a) => a.id === parsed.data.id);
+    if (existing && existing.status === "cancelled") {
+      setError("Appointment is already cancelled.");
+      setFeedback(null);
+      return;
+    }
+    // فتح حوار تأكيد قبل الإلغاء
+    setCancelConfirmation(parsed.data.id);
+  }
+
+  function confirmCancel() {
+    if (cancelConfirmation) {
+      cancelMutation.mutate({ id: cancelConfirmation });
+    }
+  }
+
+  function closeCancelModal() {
+    setCancelConfirmation(null);
   }
 
   if (appointmentsQuery.isPending) {
@@ -612,6 +647,7 @@ export default function AppointmentsPage() {
               <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
             <tr>
               <Header label="ID" />
+              <Header label="Patient" />
               <Header label="Service" />
               <Header label="Start" />
               <Header label="End" />
@@ -636,6 +672,18 @@ export default function AppointmentsPage() {
                     <tr key={appointment.id} className="hover:bg-gray-50 transition-colors">
                   <Cell>{appointment.id}</Cell>
                       <Cell>
+                        {appointment.patient_name ? (
+                          <div className="flex flex-col">
+                            <span className="text-sm font-semibold text-gray-900">{appointment.patient_name}</span>
+                            {appointment.patient_id ? (
+                              <span className="text-xs text-gray-500">ID: {appointment.patient_id}</span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-500">—</span>
+                        )}
+                      </Cell>
+                      <Cell>
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                           {appointment.service_code}
                         </span>
@@ -658,6 +706,65 @@ export default function AppointmentsPage() {
         </table>
           </div>
         </div>
+
+        {/* Cancel Confirmation Modal */}
+        {cancelConfirmation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-red-500 to-red-600 px-6 py-4 flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
+                  <AlertTriangle className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-white">Confirm Cancel</h2>
+                  <p className="text-sm text-red-100">This action cannot be undone</p>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="p-6">
+                <p className="text-gray-700 text-base leading-relaxed">
+                  Are you sure you want to cancel appointment{" "}
+                  <span className="font-semibold text-gray-900">#{cancelConfirmation}</span>?
+                </p>
+                <p className="text-sm text-gray-500 mt-2">
+                  The appointment will be marked as cancelled and removed from the schedule.
+                </p>
+              </div>
+
+              {/* Footer */}
+              <div className="bg-gray-50 px-6 py-4 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeCancelModal}
+                  className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors"
+                  disabled={cancelMutation.isPending}
+                >
+                  Keep Appointment
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmCancel}
+                  className="px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 transition-all shadow-lg disabled:opacity-50 inline-flex items-center gap-2"
+                  disabled={cancelMutation.isPending}
+                >
+                  {cancelMutation.isPending ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Cancelling...
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-4 h-4" />
+                      Cancel Appointment
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Pagination */}
         {pagination.total > pagination.size && (

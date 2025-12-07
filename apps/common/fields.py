@@ -79,35 +79,25 @@ class CompatDateTimeRangeField(DateTimeRangeField):
             return "text"
         return super().db_type(connection)
 
-    # قبل:
-    # def get_db_prep_value(self, value, connection, prepared=False):
-    #     if connection.vendor == "postgresql":
-    #         return super().get_db_prep_value(value, connection, prepared=prepared)
-    #     if value is None:
-    #         return None
-    #     if not prepared:
-    #         value = super().get_prep_value(value)
-    #     lower = getattr(value, "lower", None)
-    #     upper = getattr(value, "upper", None)
-    #     if lower is None and upper is None and isinstance(value, (tuple, list)):
-    #         lower, upper = value
-    #     payload = {
-    #         "lower": lower.isoformat() if lower else None,
-    #         "upper": upper.isoformat() if upper else None,
-    #     }
-    #     return json.dumps(payload)
-
-    # بعد:
-    def get_db_prep_value(self, value, connection):
+    def get_db_prep_value(self, value, connection, prepared: bool = False):
+        """
+        Django (and DRF) may pass `prepared` kwarg to this hook. Keep the
+        signature compatible with the parent to avoid TypeError.
+        """
         if connection.vendor == "postgresql":
-            return super().get_db_prep_value(value, connection)
+            return super().get_db_prep_value(value, connection, prepared=prepared)
+
         if value is None:
             return None
-        value = super().get_prep_value(value)
+
+        if not prepared:
+            value = super().get_prep_value(value)
+
         lower = getattr(value, "lower", None)
         upper = getattr(value, "upper", None)
         if lower is None and upper is None and isinstance(value, (tuple, list)):
             lower, upper = value
+
         payload = {
             "lower": lower.isoformat() if lower else None,
             "upper": upper.isoformat() if upper else None,
@@ -115,24 +105,42 @@ class CompatDateTimeRangeField(DateTimeRangeField):
         return json.dumps(payload)
 
     def from_db_value(self, value, expression, connection):
+        """
+        Deserialize stored range value for both Postgres and fallback DBs.
+
+        - Postgres: use parent implementation when available.
+        - Other DBs: stored as JSON, reconstruct aware datetimes.
+        """
         if connection.vendor == "postgresql":
-            return super().from_db_value(value, expression, connection)
+            try:
+                return super().from_db_value(value, expression, connection)  # type: ignore[arg-type]
+            except AttributeError:
+                # Older Django/psycopg versions might not implement it; return raw value
+                return value
+
         if value in (None, ""):
             return None
+
         if isinstance(value, str):
             try:
                 payload = json.loads(value)
             except json.JSONDecodeError:
                 return value
-            lower = payload.get("lower")
-            upper = payload.get("upper")
-            lower_dt = datetime.fromisoformat(lower) if lower else None
-            upper_dt = datetime.fromisoformat(upper) if upper else None
-            return (
-                timezone.make_aware(lower_dt) if lower_dt and lower_dt.tzinfo is None else lower_dt,
-                timezone.make_aware(upper_dt) if upper_dt and upper_dt.tzinfo is None else upper_dt,
-            )
-        return value
+        elif isinstance(value, dict):
+            payload = value
+        else:
+            return value
+
+        lower = payload.get("lower")
+        upper = payload.get("upper")
+        lower_dt = datetime.fromisoformat(lower) if lower else None
+        upper_dt = datetime.fromisoformat(upper) if upper else None
+
+        # Ensure timezone-aware values
+        lower_dt = timezone.make_aware(lower_dt) if lower_dt and lower_dt.tzinfo is None else lower_dt
+        upper_dt = timezone.make_aware(upper_dt) if upper_dt and upper_dt.tzinfo is None else upper_dt
+
+        return (lower_dt, upper_dt)
 
     def get_placeholder(self, value, compiler, connection):
         if connection.vendor != "postgresql":
