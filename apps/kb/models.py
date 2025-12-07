@@ -14,7 +14,7 @@ class KnowledgeDocument(TimeStampedModel):
         Clinic, on_delete=models.CASCADE, related_name="knowledge_documents"
     )
     language = models.CharField(
-        max_length=2, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
+        max_length=10, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
     )
     title = models.CharField(max_length=255)
     source = models.CharField(max_length=255, blank=True)
@@ -40,7 +40,7 @@ class KnowledgeChunk(TimeStampedModel):
     score = models.FloatField(default=0.0)
     metadata = models.JSONField(default=dict, blank=True)
     language = models.CharField(
-        max_length=2, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
+        max_length=10, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
     )
     tags = CompatArrayField(models.CharField(max_length=32), default=list, blank=True)
 

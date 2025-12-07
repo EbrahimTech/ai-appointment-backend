@@ -15,7 +15,7 @@ class Patient(TimeStampedModel):
     )
     full_name = models.CharField(max_length=255)
     language = models.CharField(
-        max_length=2, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
+        max_length=10, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
     )
     phone_number = models.CharField(max_length=32)
     normalized_phone = models.CharField(max_length=32, db_index=True)

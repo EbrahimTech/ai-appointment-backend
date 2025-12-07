@@ -34,7 +34,7 @@ export default function TemplatesPage() {
   const { support } = useSupportSession();
   const readOnly = Boolean(support);
 
-  const [lang, setLang] = useState<string>("en");
+  const [lang, setLang] = useState<string>("");
   const [search, setSearch] = useState<string>("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -280,8 +280,10 @@ export default function TemplatesPage() {
             onChange={(event) => setLang(event.target.value)}
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
           >
-            <option value="en">English</option>
+            <option value="">All Languages</option>
             <option value="ar">Arabic</option>
+            <option value="en">English</option>
+            <option value="en_US">English (US)</option>
           </select>
             </div>
             <div className="flex-1 max-w-md">
@@ -545,9 +547,13 @@ export default function TemplatesPage() {
                         className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                         required
                       >
-                        <option value="en">English</option>
                         <option value="ar">Arabic</option>
+                        <option value="en">English</option>
+                        <option value="en_US">English (US)</option>
                       </select>
+                      <p className="text-xs text-gray-500">
+                        ⚠️ يجب أن تطابق اللغة في Meta: English = en, English (US) = en_US
+                      </p>
                     </div>
                   </div>
 

@@ -46,6 +46,7 @@ class WhatsAppProvider(ABC):
         template_body: str,
         variables: dict[str, str],
         access_token: str,
+        language_code: str = "en",
     ) -> WhatsAppMessageResult:
         """Send an HSM template message."""
         pass
@@ -124,6 +125,7 @@ class MetaWhatsAppProvider(WhatsAppProvider):
         template_body: str,
         variables: dict[str, str],
         access_token: str,
+        language_code: str = "en",
     ) -> WhatsAppMessageResult:
         """Send an HSM template via Meta API."""
         url = f"{self.base_url}/{self.phone_number_id}/messages"
@@ -144,7 +146,7 @@ class MetaWhatsAppProvider(WhatsAppProvider):
             "type": "template",
             "template": {
                 "name": template_id,
-                "language": {"code": "en"},  # Default, should be configurable
+                "language": {"code": language_code},
                 "components": components if components else None,
             },
         }
@@ -255,6 +257,7 @@ class TwilioWhatsAppProvider(WhatsAppProvider):
         template_body: str,
         variables: dict[str, str],
         access_token: str,  # Not used for Twilio, but required by interface
+        language_code: str = "en",
     ) -> WhatsAppMessageResult:
         """Send an HSM template via Twilio API."""
         # Twilio uses ContentSid for templates
@@ -391,6 +394,7 @@ class GenericWhatsAppProvider(WhatsAppProvider):
         template_body: str,
         variables: dict[str, str],
         access_token: str,
+        language_code: str = "en",
     ) -> WhatsAppMessageResult:
         """Send an HSM template via generic API."""
         url = f"{self.api_url}/templates"

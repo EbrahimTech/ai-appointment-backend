@@ -51,7 +51,7 @@ class ConversationMessage(TimeStampedModel):
         max_length=10, choices=MessageDirection.choices, db_index=True
     )
     language = models.CharField(
-        max_length=2, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
+        max_length=10, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
     )
     body = models.TextField()
     normalized_body = models.TextField(blank=True)

@@ -8,8 +8,9 @@ from apps.common.models import SoftDeletableModel, TimeStampedModel
 class LanguageChoices(models.TextChoices):
     """Supported languages for multi-lingual content."""
 
-    ENGLISH = "en", "English"
     ARABIC = "ar", "Arabic"
+    ENGLISH = "en", "English"
+    ENGLISH_US = "en_US", "English (US)"
 
 
 class WeekdayChoices(models.IntegerChoices):
@@ -51,7 +52,7 @@ class ClinicService(SoftDeletableModel):
     description = models.TextField(blank=True)
     duration_minutes = models.PositiveIntegerField(default=30)
     language = models.CharField(
-        max_length=2, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
+        max_length=10, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
     )
 
     class Meta:

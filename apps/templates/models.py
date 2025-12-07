@@ -24,7 +24,7 @@ class MessageTemplate(SoftDeletableModel):
     )
     code = models.CharField(max_length=100)
     language = models.CharField(
-        max_length=2, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
+        max_length=10, choices=LanguageChoices.choices, default=LanguageChoices.ENGLISH
     )
     category = models.CharField(
         max_length=20, choices=TemplateCategory.choices, default=TemplateCategory.WHATSAPP

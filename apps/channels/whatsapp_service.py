@@ -159,6 +159,7 @@ class WhatsAppService:
             
             template_body = outbox.hsm_template.body
             variables = outbox.metadata.get("variables", {}) or outbox.payload.get("variables", {})
+            language_code = outbox.hsm_template.language or "en"
             
             result = provider.send_hsm_template(
                 to=to_phone,
@@ -166,6 +167,7 @@ class WhatsAppService:
                 template_body=template_body,
                 variables=variables,
                 access_token=access_token,
+                language_code=language_code,
             )
         
         else:
