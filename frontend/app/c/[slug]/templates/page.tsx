@@ -164,7 +164,8 @@ export default function TemplatesPage() {
     let variables: Record<string, string> | undefined;
     if (template.variables?.length) {
       variables = template.variables.reduce<Record<string, string>>((acc, current) => {
-        acc[current] = "";
+        // Use sample values instead of empty strings for preview
+        acc[current] = `[${current}]`;
         return acc;
       }, {});
     }
@@ -357,6 +358,9 @@ export default function TemplatesPage() {
                     Template Key
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    Language
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     Variables
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -373,7 +377,7 @@ export default function TemplatesPage() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {templates.length === 0 ? (
               <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center">
+                    <td colSpan={6} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center">
                         <FileText className="w-12 h-12 text-gray-400 mb-3" />
                         <p className="text-sm font-medium text-gray-900 mb-1">No templates found</p>
@@ -386,6 +390,20 @@ export default function TemplatesPage() {
                     <tr key={`${template.lang}-${template.key}`} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-semibold text-gray-900">{template.key}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            template.lang === 'ar' ? 'bg-amber-100 text-amber-700' : 
+                            template.lang === 'en_US' ? 'bg-blue-100 text-blue-700' : 
+                            'bg-green-100 text-green-700'
+                          }`}
+                        >
+                          {template.lang === 'ar' ? 'Arabic' : 
+                           template.lang === 'en_US' ? 'English (US)' : 
+                           template.lang === 'en' ? 'English' : 
+                           template.lang}
+                        </span>
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm text-gray-600">
