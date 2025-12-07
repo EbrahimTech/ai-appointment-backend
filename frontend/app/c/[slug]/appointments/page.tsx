@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupportSession } from "../../../providers";
 import { z } from "zod";
-import { Calendar, RefreshCw, Plus, Edit, XCircle, Filter, AlertCircle, CheckCircle2, X, Search } from "lucide-react";
+import { Calendar, RefreshCw, Plus, Edit, XCircle, Filter, AlertCircle, CheckCircle2, X, Search, Info, Clock } from "lucide-react";
 
 type Appointment = {
   id: number;
@@ -521,6 +521,19 @@ export default function AppointmentsPage() {
                   className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               required
             />
+                <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-blue-800">
+                    <p className="font-medium mb-1">Working Hours:</p>
+                    <ul className="space-y-0.5 text-blue-700">
+                      <li>• Mon-Wed: 9:00 AM - 5:00 PM</li>
+                      <li>• Thursday: 9:00 AM - 1:00 PM</li>
+                      <li className="text-red-600 font-medium">• Friday: Closed</li>
+                      <li>• Saturday: 9:00 AM - 1:00 PM, 2:00 PM - 6:00 PM</li>
+                      <li>• Sunday: 9:00 AM - 5:00 PM, 2:00 PM - 8:00 PM</li>
+                    </ul>
+                  </div>
+                </div>
           </div>
             <button
               type="submit"
@@ -554,6 +567,10 @@ export default function AppointmentsPage() {
                   className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               required
             />
+                <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <Clock className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-blue-700">Ensure the new time is within working hours (Mon-Thu: 9AM-5PM, Sat-Sun: 9AM-8PM). Friday is closed.</p>
+                </div>
           </div>
             <button
               type="submit"
