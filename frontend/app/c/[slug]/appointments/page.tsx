@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupportSession } from "../../../providers";
 import { z } from "zod";
-import { Calendar, RefreshCw, Plus, Edit, XCircle, Filter, AlertCircle, CheckCircle2, X } from "lucide-react";
+import { Calendar, RefreshCw, Plus, Edit, XCircle, Filter, AlertCircle, CheckCircle2, X, Search } from "lucide-react";
 
 type Appointment = {
   id: number;
@@ -15,6 +15,15 @@ type Appointment = {
   status: string;
   external_event_id: string | null;
   sync_state: "ok" | "tentative" | "failed";
+};
+
+type Service = {
+  code: string;
+  name: string;
+  description: string;
+  duration_minutes: number;
+  language: string;
+  is_active: boolean;
 };
 
 type AppointmentListResponse = {
@@ -55,6 +64,21 @@ export default function AppointmentsPage() {
 
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [serviceSearch, setServiceSearch] = useState("");
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [showServiceDropdown, setShowServiceDropdown] = useState(false);
+
+  const servicesQuery = useQuery({
+    queryKey: ["services", slug],
+    queryFn: async () => {
+      const response = await fetch(`/api/proxy/clinic/${slug}/services`);
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Failed to load services");
+      }
+      return payload.data.items as Service[];
+    },
+  });
 
   const appointmentsQuery = useQuery({
     queryKey: ["appointments", slug, filters],
@@ -93,6 +117,8 @@ export default function AppointmentsPage() {
         }`
       );
       setError(null);
+      setSelectedService(null);
+      setServiceSearch("");
     },
     onError: (err: Error) => {
       setError(humanizeError(err.message));
@@ -154,6 +180,17 @@ export default function AppointmentsPage() {
 
   const appointments = useMemo(() => appointmentsQuery.data?.items ?? [], [appointmentsQuery.data]);
 
+  const filteredServices = useMemo(() => {
+    const services = servicesQuery.data ?? [];
+    if (!serviceSearch) return services;
+    const lowerSearch = serviceSearch.toLowerCase();
+    return services.filter(
+      (s) =>
+        s.code.toLowerCase().includes(lowerSearch) ||
+        s.name.toLowerCase().includes(lowerSearch)
+    );
+  }, [servicesQuery.data, serviceSearch]);
+
   function updateFilter(event: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = event.target;
     setFilters((prev) => ({
@@ -174,12 +211,18 @@ export default function AppointmentsPage() {
       setFeedback(null);
       return;
     }
+    if (!selectedService) {
+      setError("Please select a service");
+      setFeedback(null);
+      return;
+    }
     const formData = new FormData(event.currentTarget);
     const payload = {
       patient_id: Number(formData.get("patient_id")),
-      service_code: String(formData.get("service_code")),
+      service_code: selectedService.code,
       start_at_iso: String(formData.get("start_at_iso")),
     };
+    console.log("Creating appointment with payload:", payload);
     const parsed = createSchema.safeParse(payload);
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Invalid form");
@@ -392,7 +435,81 @@ export default function AppointmentsPage() {
             </div>
             <form className="space-y-4" onSubmit={handleCreate}>
           <InputField name="patient_id" label="Patient ID" placeholder="123" type="number" />
-              <InputField name="service_code" label="Service Code" placeholder="clean" />
+              
+              {/* Service Selector with Search */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Service <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder={selectedService ? `${selectedService.name} (${selectedService.code})` : "Search services..."}
+                      value={serviceSearch}
+                      onChange={(e) => setServiceSearch(e.target.value)}
+                      onFocus={() => setShowServiceDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowServiceDropdown(false), 200)}
+                      className="w-full rounded-lg border border-gray-300 pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                    />
+                  </div>
+                  
+                  {showServiceDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                      {servicesQuery.isLoading ? (
+                        <div className="px-4 py-3 text-sm text-gray-500">Loading services...</div>
+                      ) : filteredServices.length === 0 ? (
+                        <div className="px-4 py-3 text-sm text-gray-500">No services found</div>
+                      ) : (
+                        filteredServices.map((service) => (
+                          <button
+                            key={service.code}
+                            type="button"
+                            onClick={() => {
+                              setSelectedService(service);
+                              setServiceSearch("");
+                              setShowServiceDropdown(false);
+                            }}
+                            className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium text-gray-900 truncate">
+                                  {service.name}
+                                </div>
+                                <div className="text-xs text-gray-500 mt-0.5">
+                                  Code: {service.code} • {service.duration_minutes} min
+                                </div>
+                              </div>
+                              {selectedService?.code === service.code && (
+                                <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+                              )}
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {selectedService && (
+                  <div className="flex items-center gap-2 mt-2 p-2 bg-blue-50 rounded-lg">
+                    <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                    <span className="text-xs text-blue-700 font-medium">
+                      {selectedService.name} ({selectedService.code})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedService(null)}
+                      className="ml-auto p-0.5 rounded hover:bg-blue-100 transition-colors"
+                    >
+                      <X className="w-3 h-3 text-blue-600" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700" htmlFor="start_at_iso">
                   Start Time

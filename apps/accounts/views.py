@@ -2624,3 +2624,329 @@ class ClinicSettingsView(APIView):
         return ok_response(data)
 
 
+class ClinicPatientListView(APIView):
+    """Manage clinic patients (list, create)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+            ClinicMembership.Role.VIEWER,
+        ]
+    )
+    def get(self, request, slug: str):
+        """List all patients for the clinic."""
+        clinic: Clinic = request.clinic
+        patients = clinic.patients.order_by("-created_at")
+        
+        # Optional search filter
+        search = request.GET.get("search", "").strip()
+        if search:
+            patients = patients.filter(
+                models.Q(full_name__icontains=search) |
+                models.Q(phone_number__icontains=search) |
+                models.Q(email__icontains=search)
+            )
+        
+        items = [
+            {
+                "id": patient.id,
+                "full_name": patient.full_name,
+                "phone_number": patient.phone_number,
+                "alternative_phone": patient.alternative_phone or "",
+                "email": patient.email or "",
+                "emergency_contact_name": patient.emergency_contact_name or "",
+                "emergency_contact_phone": patient.emergency_contact_phone or "",
+                "date_of_birth": patient.date_of_birth.isoformat() if patient.date_of_birth else None,
+                "age": patient.age,
+                "gender": patient.gender or "",
+                "city": patient.city or "",
+                "district": patient.district or "",
+                "address": patient.address or "",
+                "allergies": patient.allergies or "",
+                "chronic_diseases": patient.chronic_diseases or "",
+                "current_medications": patient.current_medications or "",
+                "blood_type": patient.blood_type or "",
+                "notes": patient.notes or "",
+                "language": patient.language,
+                "created_at": patient.created_at.isoformat(),
+            }
+            for patient in patients
+        ]
+        return ok_response({"items": items})
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+        ]
+    )
+    def post(self, request, slug: str):
+        """Create a new patient."""
+        from apps.common.normalize import normalize_phone
+        from datetime import datetime
+        
+        clinic: Clinic = request.clinic
+        payload = request.data or {}
+        
+        # Required fields
+        full_name = str(payload.get("full_name", "")).strip()
+        phone_number = str(payload.get("phone_number", "")).strip()
+        
+        # Optional fields
+        alternative_phone = str(payload.get("alternative_phone", "")).strip()
+        email = str(payload.get("email", "")).strip()
+        emergency_contact_name = str(payload.get("emergency_contact_name", "")).strip()
+        emergency_contact_phone = str(payload.get("emergency_contact_phone", "")).strip()
+        date_of_birth = payload.get("date_of_birth")
+        gender = str(payload.get("gender", "")).strip()
+        city = str(payload.get("city", "")).strip()
+        district = str(payload.get("district", "")).strip()
+        address = str(payload.get("address", "")).strip()
+        allergies = str(payload.get("allergies", "")).strip()
+        chronic_diseases = str(payload.get("chronic_diseases", "")).strip()
+        current_medications = str(payload.get("current_medications", "")).strip()
+        blood_type = str(payload.get("blood_type", "")).strip()
+        notes = str(payload.get("notes", "")).strip()
+        language = str(payload.get("language", "ar")).strip()
+        
+        if not full_name or not phone_number:
+            return error_response("INVALID_PAYLOAD", status_code=400)
+        
+        # Validate email if provided
+        if email:
+            try:
+                validate_email(email)
+            except ValidationError:
+                return error_response("INVALID_EMAIL", status_code=400)
+        
+        # Normalize phone numbers
+        normalized = normalize_phone(phone_number)
+        normalized_alt = normalize_phone(alternative_phone) if alternative_phone else ""
+        normalized_emergency = normalize_phone(emergency_contact_phone) if emergency_contact_phone else ""
+        
+        # Check for duplicate phone number
+        if clinic.patients.filter(normalized_phone=normalized).exists():
+            return error_response("PHONE_EXISTS", status_code=400)
+        
+        # Parse date of birth if provided
+        dob = None
+        if date_of_birth:
+            try:
+                dob = datetime.fromisoformat(date_of_birth.replace('Z', '+00:00')).date()
+            except (ValueError, AttributeError):
+                return error_response("INVALID_DATE", status_code=400)
+        
+        patient = Patient.objects.create(
+            clinic=clinic,
+            full_name=full_name,
+            phone_number=phone_number,
+            normalized_phone=normalized,
+            alternative_phone=alternative_phone,
+            email=email,
+            emergency_contact_name=emergency_contact_name,
+            emergency_contact_phone=emergency_contact_phone,
+            date_of_birth=dob,
+            gender=gender,
+            city=city,
+            district=district,
+            address=address,
+            allergies=allergies,
+            chronic_diseases=chronic_diseases,
+            current_medications=current_medications,
+            blood_type=blood_type,
+            notes=notes,
+            language=language,
+        )
+        
+        AuditLog.objects.create(
+            actor_user=request.user,
+            action="PATIENT_CREATE",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta={"patient_id": patient.id, "full_name": full_name},
+        )
+        
+        return ok_response({
+            "id": patient.id,
+            "full_name": patient.full_name,
+            "phone_number": patient.phone_number,
+            "alternative_phone": patient.alternative_phone or "",
+            "email": patient.email or "",
+            "emergency_contact_name": patient.emergency_contact_name or "",
+            "emergency_contact_phone": patient.emergency_contact_phone or "",
+            "date_of_birth": patient.date_of_birth.isoformat() if patient.date_of_birth else None,
+            "age": patient.age,
+            "gender": patient.gender or "",
+            "city": patient.city or "",
+            "district": patient.district or "",
+            "address": patient.address or "",
+            "allergies": patient.allergies or "",
+            "chronic_diseases": patient.chronic_diseases or "",
+            "current_medications": patient.current_medications or "",
+            "blood_type": patient.blood_type or "",
+            "notes": patient.notes or "",
+            "language": patient.language,
+            "created_at": patient.created_at.isoformat(),
+        })
+
+
+class ClinicPatientDetailView(APIView):
+    """Update or delete a specific patient."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+        ]
+    )
+    def put(self, request, slug: str, patient_id: int):
+        """Update patient information."""
+        from apps.common.normalize import normalize_phone
+        from datetime import datetime
+        
+        clinic: Clinic = request.clinic
+        patient = clinic.patients.filter(id=patient_id).first()
+        
+        if not patient:
+            return error_response("PATIENT_NOT_FOUND", status_code=404)
+        
+        payload = request.data or {}
+        
+        # Required fields
+        full_name = str(payload.get("full_name", "")).strip()
+        phone_number = str(payload.get("phone_number", "")).strip()
+        
+        # Optional fields
+        alternative_phone = str(payload.get("alternative_phone", "")).strip()
+        email = str(payload.get("email", "")).strip()
+        emergency_contact_name = str(payload.get("emergency_contact_name", "")).strip()
+        emergency_contact_phone = str(payload.get("emergency_contact_phone", "")).strip()
+        date_of_birth = payload.get("date_of_birth")
+        gender = str(payload.get("gender", "")).strip()
+        city = str(payload.get("city", "")).strip()
+        district = str(payload.get("district", "")).strip()
+        address = str(payload.get("address", "")).strip()
+        allergies = str(payload.get("allergies", "")).strip()
+        chronic_diseases = str(payload.get("chronic_diseases", "")).strip()
+        current_medications = str(payload.get("current_medications", "")).strip()
+        blood_type = str(payload.get("blood_type", "")).strip()
+        notes = str(payload.get("notes", "")).strip()
+        language = str(payload.get("language", patient.language)).strip()
+        
+        if not full_name or not phone_number:
+            return error_response("INVALID_PAYLOAD", status_code=400)
+        
+        # Validate email if provided
+        if email:
+            try:
+                validate_email(email)
+            except ValidationError:
+                return error_response("INVALID_EMAIL", status_code=400)
+        
+        # Normalize phone numbers
+        normalized = normalize_phone(phone_number)
+        
+        # Check for duplicate phone number (excluding current patient)
+        if clinic.patients.filter(normalized_phone=normalized).exclude(id=patient_id).exists():
+            return error_response("PHONE_EXISTS", status_code=400)
+        
+        # Parse date of birth if provided
+        dob = patient.date_of_birth
+        if date_of_birth:
+            try:
+                dob = datetime.fromisoformat(date_of_birth.replace('Z', '+00:00')).date()
+            except (ValueError, AttributeError):
+                return error_response("INVALID_DATE", status_code=400)
+        
+        # Update all fields
+        patient.full_name = full_name
+        patient.phone_number = phone_number
+        patient.normalized_phone = normalized
+        patient.alternative_phone = alternative_phone
+        patient.email = email
+        patient.emergency_contact_name = emergency_contact_name
+        patient.emergency_contact_phone = emergency_contact_phone
+        patient.date_of_birth = dob
+        patient.gender = gender
+        patient.city = city
+        patient.district = district
+        patient.address = address
+        patient.allergies = allergies
+        patient.chronic_diseases = chronic_diseases
+        patient.current_medications = current_medications
+        patient.blood_type = blood_type
+        patient.notes = notes
+        patient.language = language
+        patient.save()
+        
+        AuditLog.objects.create(
+            actor_user=request.user,
+            action="PATIENT_UPDATE",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta={"patient_id": patient.id, "full_name": full_name},
+        )
+        
+        return ok_response({
+            "id": patient.id,
+            "full_name": patient.full_name,
+            "phone_number": patient.phone_number,
+            "alternative_phone": patient.alternative_phone or "",
+            "email": patient.email or "",
+            "emergency_contact_name": patient.emergency_contact_name or "",
+            "emergency_contact_phone": patient.emergency_contact_phone or "",
+            "date_of_birth": patient.date_of_birth.isoformat() if patient.date_of_birth else None,
+            "age": patient.age,
+            "gender": patient.gender or "",
+            "city": patient.city or "",
+            "district": patient.district or "",
+            "address": patient.address or "",
+            "allergies": patient.allergies or "",
+            "chronic_diseases": patient.chronic_diseases or "",
+            "current_medications": patient.current_medications or "",
+            "blood_type": patient.blood_type or "",
+            "notes": patient.notes or "",
+            "language": patient.language,
+            "created_at": patient.created_at.isoformat(),
+        })
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def delete(self, request, slug: str, patient_id: int):
+        """Delete a patient."""
+        clinic: Clinic = request.clinic
+        patient = clinic.patients.filter(id=patient_id).first()
+        
+        if not patient:
+            return error_response("PATIENT_NOT_FOUND", status_code=404)
+        
+        # Check if patient has appointments
+        if patient.appointments.exists():
+            return error_response("PATIENT_HAS_APPOINTMENTS", status_code=400)
+        
+        patient_name = patient.full_name
+        patient.delete()
+        
+        AuditLog.objects.create(
+            actor_user=request.user,
+            action="PATIENT_DELETE",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta={"patient_id": patient_id, "full_name": patient_name},
+        )
+        
+        return ok_response({"message": "Patient deleted successfully"})
+
+
