@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import timedelta
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+import logging
 
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, JsonResponse, HttpResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_http_methods
+from django.conf import settings
 
 from apps.channels.models import ChannelType, OutboxMessage, OutboxStatus, WebhookEvent
 from apps.channels.services import (
@@ -25,11 +27,35 @@ from apps.patients.utils import normalize_phone_number
 from apps.clinics.models import Clinic
 
 
+logger = logging.getLogger(__name__)
 orchestrator = DialogOrchestrator()
 
 
 def _get_language(message: Dict[str, Any]) -> str:
     return message.get("language", "en")
+
+
+def _detect_language_from_text(text: str) -> str:
+    """Detect language from text content (simple heuristic)."""
+    if not text:
+        return "en"
+    # Simple check for Arabic characters
+    arabic_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF')
+    if arabic_chars > len(text) * 0.3:  # If more than 30% Arabic
+        return "ar"
+    return "en"
+
+
+def _get_clinic_from_phone_number(phone_number_id: str) -> Optional[Clinic]:
+    """Map phone number ID to clinic. Can be enhanced with database mapping."""
+    # For now, using environment variable or default clinic
+    # You can extend this to query a ChannelAccount model
+    default_slug = getattr(settings, 'WHATSAPP_DEFAULT_CLINIC_SLUG', 'prime-dental')
+    try:
+        return Clinic.objects.get(slug=default_slug)
+    except Clinic.DoesNotExist:
+        # Fallback to first clinic
+        return Clinic.objects.first()
 
 
 def _ensure_conversation(clinic: Clinic, phone: str, lead_source: str) -> Conversation:
@@ -46,9 +72,208 @@ def _ensure_conversation(clinic: Clinic, phone: str, lead_source: str) -> Conver
 
 
 @csrf_exempt
-@require_POST
-def whatsapp_webhook(request: HttpRequest) -> JsonResponse:
-    payload = json.loads(request.body.decode("utf-8") or "{}")
+@require_http_methods(["GET", "POST"])
+def whatsapp_webhook(request: HttpRequest) -> HttpResponse:
+    """
+    Handle Meta WhatsApp Cloud API webhooks.
+
+    GET: Webhook verification (required by Meta)
+    POST: Incoming messages and status updates
+    """
+
+    # GET request: Webhook verification
+    if request.method == "GET":
+        verify_token = request.GET.get("hub.verify_token")
+        challenge = request.GET.get("hub.challenge")
+        mode = request.GET.get("hub.mode")
+
+        expected_token = getattr(settings, 'WHATSAPP_WEBHOOK_VERIFY_TOKEN', 'thebestverifytokenpassword')
+
+        if mode == "subscribe" and verify_token == expected_token:
+            logger.info("WhatsApp webhook verified successfully")
+            return HttpResponse(challenge, content_type="text/plain")
+        else:
+            logger.warning(f"WhatsApp webhook verification failed. Token: {verify_token}")
+            return HttpResponse("Forbidden", status=403)
+
+    # POST request: Handle incoming messages
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+        logger.info(f"Received WhatsApp webhook: {json.dumps(payload, indent=2)}")
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON payload")
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Meta WhatsApp format
+    if "object" in payload and payload.get("object") == "whatsapp_business_account":
+        return _handle_meta_webhook(payload)
+
+    # Legacy format (for backwards compatibility)
+    elif "clinic" in payload:
+        return _handle_legacy_webhook(payload)
+
+    # Unknown format
+    logger.warning(f"Unknown webhook format: {payload}")
+    return JsonResponse({"status": "ignored"}, status=200)
+
+
+def _handle_meta_webhook(payload: Dict[str, Any]) -> JsonResponse:
+    """Handle Meta WhatsApp Cloud API webhook format."""
+
+    entries = payload.get("entry", [])
+
+    for entry in entries:
+        changes = entry.get("changes", [])
+
+        for change in changes:
+            value = change.get("value", {})
+
+            # Get phone number ID to determine clinic
+            phone_number_id = value.get("metadata", {}).get("phone_number_id")
+            clinic = _get_clinic_from_phone_number(phone_number_id)
+
+            if not clinic:
+                logger.error(f"No clinic found for phone_number_id: {phone_number_id}")
+                continue
+
+            # Log webhook event
+            WebhookEvent.objects.create(
+                clinic=clinic,
+                channel=ChannelType.WHATSAPP,
+                provider_event_id=entry.get("id", str(uuid.uuid4())),
+                payload=payload,
+            )
+
+            # Process incoming messages
+            messages = value.get("messages", [])
+            for msg in messages:
+                _process_whatsapp_message(clinic, msg, value)
+
+            # Process status updates
+            statuses = value.get("statuses", [])
+            for status in statuses:
+                _process_whatsapp_status(status)
+
+    return JsonResponse({"status": "ok"}, status=200)
+
+
+def _process_whatsapp_message(clinic: Clinic, msg: Dict[str, Any], metadata: Dict[str, Any]) -> None:
+    """Process a single WhatsApp message from Meta format."""
+
+    # Extract message data
+    from_number = msg.get("from", "")
+    phone = normalize_phone_number(from_number)
+
+    if not phone:
+        logger.warning(f"Invalid phone number: {from_number}")
+        return
+
+    # Get message text
+    msg_type = msg.get("type", "text")
+    text_body = ""
+
+    if msg_type == "text":
+        text_body = msg.get("text", {}).get("body", "")
+    elif msg_type == "button":
+        text_body = msg.get("button", {}).get("text", "")
+    elif msg_type == "interactive":
+        interactive = msg.get("interactive", {})
+        if interactive.get("type") == "button_reply":
+            text_body = interactive.get("button_reply", {}).get("title", "")
+        elif interactive.get("type") == "list_reply":
+            text_body = interactive.get("list_reply", {}).get("title", "")
+    else:
+        logger.info(f"Unsupported message type: {msg_type}")
+        return
+
+    # Detect language
+    language = _detect_language_from_text(text_body)
+
+    # Get or create patient
+    profile_name = metadata.get("contacts", [{}])[0].get("profile", {}).get("name", "Guest")
+
+    patient, _ = Patient.objects.get_or_create(
+        clinic=clinic,
+        normalized_phone=phone,
+        defaults={
+            "full_name": profile_name,
+            "phone_number": phone,
+            "language": language,
+        },
+    )
+
+    # Update patient language if detected
+    if patient.language != language:
+        patient.language = language
+        patient.save(update_fields=["language"])
+
+    # Get or create conversation
+    conversation = _ensure_conversation(clinic, phone, lead_source="whatsapp")
+    if not conversation.patient:
+        conversation.patient = patient
+        conversation.save(update_fields=["patient", "updated_at"])
+
+    # Process through dialog orchestrator
+    try:
+        response_text, intent = orchestrator.handle_inbound(
+            conversation,
+            body=text_body,
+            language=language,
+        )
+
+        logger.info(f"Conversation {conversation.id} - Intent: {intent}, Response: {response_text[:100] if response_text else 'None'}")
+
+        # Send welcome message for booking intent
+        if intent == "book" and response_text:
+            template_name = "whatsapp_welcome_en" if language == "en" else "whatsapp_welcome_ar"
+            enqueue_whatsapp_hsm(
+                clinic_id=clinic.id,
+                conversation=conversation,
+                template_name=template_name,
+                language=language,
+                variables={"name": patient.full_name},
+                delay_seconds=3,
+            )
+    except Exception as e:
+        logger.error(f"Error processing message: {e}", exc_info=True)
+
+
+def _process_whatsapp_status(status: Dict[str, Any]) -> None:
+    """Process WhatsApp message status update."""
+
+    message_id = status.get("id")
+    recipient = status.get("recipient_id")
+    status_type = status.get("status", "").lower()
+
+    logger.info(f"Status update for message {message_id}: {status_type}")
+
+    # Find outbox message by provider message ID
+    outbox = OutboxMessage.objects.filter(
+        payload__provider_message_id=message_id
+    ).first()
+
+    if not outbox:
+        logger.warning(f"Outbox message not found for provider_message_id: {message_id}")
+        return
+
+    # Update status
+    if status_type == "delivered":
+        mark_outbox_delivered(outbox, status.get("timestamp"))
+    elif status_type == "failed":
+        outbox.status = OutboxStatus.FAILED
+        outbox.last_error = status.get("errors", [{}])[0].get("message", "delivery_failed")
+        outbox.metadata["provider_status"] = status
+        outbox.save(update_fields=["status", "last_error", "metadata", "updated_at"])
+    elif status_type in ["sent", "read"]:
+        if outbox.status == OutboxStatus.QUEUED:
+            outbox.status = OutboxStatus.SENT
+            outbox.metadata["provider_status"] = status
+            outbox.save(update_fields=["status", "metadata", "updated_at"])
+
+
+def _handle_legacy_webhook(payload: Dict[str, Any]) -> JsonResponse:
+    """Handle legacy webhook format for backwards compatibility."""
+
     clinic_slug = payload.get("clinic")
     if not clinic_slug:
         return JsonResponse({"ok": False, "error": "clinic missing"}, status=400)
