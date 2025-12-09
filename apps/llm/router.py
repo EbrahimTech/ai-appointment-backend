@@ -23,6 +23,48 @@ class LLMRouterError(RuntimeError):
     """Raised for recoverable router errors."""
 
 
+def create_embedding(text: str, api_key: str = None, api_base: str = None) -> List[float] | None:
+    """
+    Create embedding vector for text using DeepSeek API.
+
+    Returns None if embedding fails.
+    """
+    if not api_key:
+        api_key = settings.DEEPSEEK_API_KEY
+    if not api_base:
+        api_base = settings.DEEPSEEK_API_BASE.rstrip("/")
+
+    if not api_key:
+        logger.error("DeepSeek API key not configured for embeddings")
+        return None
+
+    try:
+        response = requests.post(
+            f"{api_base}/v1/embeddings",
+            json={
+                "model": "text-embedding-3-small",
+                "input": text[:8000],  # Limit input length
+            },
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Embedding API error {response.status_code}: {response.text}")
+            return None
+
+        payload = response.json()
+        embedding = payload["data"][0]["embedding"]
+        return embedding
+
+    except Exception as e:
+        logger.error(f"Failed to create embedding: {e}")
+        return None
+
+
 class LLMRouter:
     """Resolve gray intents via DeepSeek constrained by knowledge base chunks."""
 

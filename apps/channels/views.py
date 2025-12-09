@@ -14,7 +14,13 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST, require_http_methods
 from django.conf import settings
 
-from apps.channels.models import ChannelType, OutboxMessage, OutboxStatus, WebhookEvent
+from apps.channels.models import (
+    ChannelAccount,
+    ChannelType,
+    OutboxMessage,
+    OutboxStatus,
+    WebhookEvent,
+)
 from apps.channels.services import (
     enqueue_whatsapp_hsm,
     mark_outbox_delivered,
@@ -47,9 +53,20 @@ def _detect_language_from_text(text: str) -> str:
 
 
 def _get_clinic_from_phone_number(phone_number_id: str) -> Optional[Clinic]:
-    """Map phone number ID to clinic. Can be enhanced with database mapping."""
-    # For now, using environment variable or default clinic
-    # You can extend this to query a ChannelAccount model
+    """Resolve clinic by provider phone_number_id; fall back to default slug."""
+    if phone_number_id:
+        account = (
+            ChannelAccount.objects.filter(
+                channel=ChannelType.WHATSAPP,
+                provider_name__iexact="meta",
+                metadata__phone_number_id=str(phone_number_id).strip(),
+            )
+            .select_related("clinic")
+            .first()
+        )
+        if account:
+            return account.clinic
+
     default_slug = getattr(settings, 'WHATSAPP_DEFAULT_CLINIC_SLUG', 'prime-dental')
     try:
         return Clinic.objects.get(slug=default_slug)
@@ -136,22 +153,40 @@ def _handle_meta_webhook(payload: Dict[str, Any]) -> JsonResponse:
                 logger.error(f"No clinic found for phone_number_id: {phone_number_id}")
                 continue
 
-            # Log webhook event
-            WebhookEvent.objects.create(
-                clinic=clinic,
-                channel=ChannelType.WHATSAPP,
-                provider_event_id=entry.get("id", str(uuid.uuid4())),
-                payload=payload,
-            )
+            provider_event_root = entry.get("id", str(uuid.uuid4()))
 
             # Process incoming messages
             messages = value.get("messages", [])
-            for msg in messages:
+            for idx, msg in enumerate(messages):
+                # Deduplicate on provider message id when present
+                provider_event_id = msg.get("id") or f"{provider_event_root}-msg-{idx}"
+                webhook_event, created = WebhookEvent.objects.get_or_create(
+                    provider_event_id=provider_event_id,
+                    defaults={
+                        "clinic": clinic,
+                        "channel": ChannelType.WHATSAPP,
+                        "payload": payload,
+                    },
+                )
+                if not created:
+                    # Duplicate delivery; skip processing
+                    continue
                 _process_whatsapp_message(clinic, msg, value)
 
             # Process status updates
-            statuses = value.get("statuses", [])
-            for status in statuses:
+            statuses = value.get("statuses", []) if value else []
+            for idx, status in enumerate(statuses):
+                provider_event_id = status.get("id") or f"{provider_event_root}-status-{idx}"
+                webhook_event, created = WebhookEvent.objects.get_or_create(
+                    provider_event_id=provider_event_id,
+                    defaults={
+                        "clinic": clinic,
+                        "channel": ChannelType.WHATSAPP,
+                        "payload": payload,
+                    },
+                )
+                if not created:
+                    continue
                 _process_whatsapp_status(status)
 
     return JsonResponse({"status": "ok"}, status=200)

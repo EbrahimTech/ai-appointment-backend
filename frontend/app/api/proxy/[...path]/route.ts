@@ -60,20 +60,24 @@ async function forward(request: Request, { params }: RouteParams, method: string
     Authorization: `Bearer ${authToken}`,
   };
 
-  const isJson = request.headers.get("content-type")?.includes("application/json");
-  if (isJson) {
-    headers["Content-Type"] = "application/json";
+  const incomingContentType = request.headers.get("content-type");
+  if (incomingContentType) {
+    headers["Content-Type"] = incomingContentType;
   }
 
   let body: BodyInit | undefined;
   if (!["GET", "HEAD"].includes(method)) {
-    body = await request.text();
+    // Preserve binary/multipart bodies (e.g., file uploads)
+    const buffer = await request.arrayBuffer();
+    body = buffer;
   }
 
   const response = await fetch(backend.toString(), {
     method,
     headers,
     body,
+    // Required when streaming bodies in Node 18+ (keeps multipart intact)
+    ...(body ? { duplex: "half" as const } : {}),
   });
   const payload = await response.text();
   return new Response(payload, {

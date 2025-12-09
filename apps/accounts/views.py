@@ -2151,7 +2151,8 @@ class ClinicKnowledgePublishView(APIView):
                 tag = (document.metadata or {}).get("tag", "service")
                 chunks = _chunk_document(document.body)
                 for idx, content in enumerate(chunks):
-                    KnowledgeChunk.objects.create(
+                    # Create chunk first
+                    chunk = KnowledgeChunk.objects.create(
                         document=document,
                         chunk_index=idx,
                         content=content,
@@ -2160,6 +2161,14 @@ class ClinicKnowledgePublishView(APIView):
                         metadata={"source": document.source, "tag": tag},
                     )
                     total_chunks += 1
+
+                    # Generate embedding for the chunk
+                    from apps.llm.router import create_embedding
+                    embedding_vector = create_embedding(content)
+                    if embedding_vector:
+                        chunk.embedding = embedding_vector
+                        chunk.save(update_fields=["embedding", "updated_at"])
+
                 document.metadata["pending"] = False
                 document.save(update_fields=["metadata", "updated_at"])
             index.documents.set(clinic.knowledge_documents.all())
