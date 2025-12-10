@@ -11,6 +11,7 @@ type PreviewResult = {
     id: number | string;
     lang: string;
     tag: string;
+    score?: number;
     excerpt: string;
   }[];
   answer?: string;
@@ -317,6 +318,11 @@ export default function KnowledgePage() {
                         <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700">
                           {chunk.tag}
                         </span>
+                        {typeof chunk.score === "number" ? (
+                          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                            score: {chunk.score.toFixed(2)}
+                          </span>
+                        ) : null}
                       </div>
                       <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{chunk.excerpt}</p>
                     </li>
