@@ -16,8 +16,6 @@ from apps.accounts.views import (
     ClinicKnowledgePreviewView,
     ClinicKnowledgePublishView,
     ClinicKnowledgeUploadView,
-    ClinicNotificationListView,
-    ClinicNotificationMarkReadView,
     ClinicOutboxStatusView,
     ClinicPatientDetailView,
     ClinicPatientListView,
@@ -120,12 +118,6 @@ urlpatterns = [
         "clinic/<slug:slug>/outbox/<int:outbox_id>",
         ClinicOutboxStatusView.as_view(),
         name="clinic-outbox-status",
-    ),
-    path("clinic/<slug:slug>/notifications", ClinicNotificationListView.as_view(), name="clinic-notifications"),
-    path(
-        "clinic/<slug:slug>/notifications/<int:notification_id>/read",
-        ClinicNotificationMarkReadView.as_view(),
-        name="clinic-notification-read",
     ),
     path(
         "clinic/<slug:slug>/setup-status",
