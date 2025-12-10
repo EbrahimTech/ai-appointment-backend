@@ -50,8 +50,6 @@ from apps.channels.services import (
     enqueue_whatsapp_message,
 )
 from apps.workers.tasks import schedule_google_calendar_retry
-from apps.dialog.normalization import normalize_text
-from apps.llm.router import LLMRouter
 
 
 class ClinicDashboardView(APIView):
@@ -2153,8 +2151,7 @@ class ClinicKnowledgePublishView(APIView):
                 tag = (document.metadata or {}).get("tag", "service")
                 chunks = _chunk_document(document.body)
                 for idx, content in enumerate(chunks):
-                    # Create chunk first
-                    chunk = KnowledgeChunk.objects.create(
+                    KnowledgeChunk.objects.create(
                         document=document,
                         chunk_index=idx,
                         content=content,
@@ -2163,14 +2160,6 @@ class ClinicKnowledgePublishView(APIView):
                         metadata={"source": document.source, "tag": tag},
                     )
                     total_chunks += 1
-
-                    # Generate embedding for the chunk
-                    from apps.llm.router import create_embedding
-                    embedding_vector = create_embedding(content)
-                    if embedding_vector:
-                        chunk.embedding = embedding_vector
-                        chunk.save(update_fields=["embedding", "updated_at"])
-
                 document.metadata["pending"] = False
                 document.save(update_fields=["metadata", "updated_at"])
             index.documents.set(clinic.knowledge_documents.all())
@@ -2202,47 +2191,53 @@ class ClinicKnowledgePreviewView(APIView):
         if language not in {lang[0] for lang in LanguageChoices.choices}:
             return error_response("INVALID_QUERY", status_code=400)
 
-        router = LLMRouter()
-        # Use the same retrieval path as runtime LLM to keep preview consistent
-        candidate_chunks = router._retrieve_chunks(clinic=clinic, language=language)
-        if not candidate_chunks:
+        chunks = list(
+            KnowledgeChunk.objects.filter(document__clinic=clinic).select_related("document")
+        )
+        if not chunks:
             return ok_response({"chunks": []})
 
-        query_norm = normalize_text(query)
-        query_tokens = [tok for tok in query_norm.split() if tok]
+        scored = []
+        for chunk in chunks:
+            score = _compute_chunk_score(chunk.content, query)
+            if score <= 0:
+                continue
+            scored.append((chunk, score))
 
-        def _score_chunk(chunk: KnowledgeChunk) -> float:
-            if not query_tokens:
-                return 0.0
-            content_norm = normalize_text(chunk.content or "")
-            return float(sum(content_norm.count(tok) for tok in query_tokens))
+        if not scored:
+            return ok_response({"chunks": []})
 
-        scored = [(chunk, _score_chunk(chunk)) for chunk in candidate_chunks]
-        scored.sort(key=lambda item: item[1], reverse=True)
+        desired = [item for item in scored if item[0].language == language]
+        fallback = [item for item in scored if item[0].language != language]
+
+        desired.sort(key=lambda x: x[1], reverse=True)
+        fallback.sort(key=lambda x: x[1], reverse=True)
+        combined = desired + fallback
 
         char_budget = getattr(settings, "RAG_MAX_TOKENS", 1000) * getattr(settings, "RAG_CHARS_PER_TOKEN", 4)
-        selected: list[dict] = []
+        selected = []
         running = 0
-        for chunk, score in scored:
-            content = (chunk.content or "").strip()
-            if not content:
-                continue
+        for chunk, score in combined:
+            content = chunk.content.strip()
             addition = len(content)
             if selected and running + addition > char_budget:
-                continue
-            tag = (chunk.metadata or {}).get("tag") or (chunk.tags[0] if chunk.tags else "")
-            selected.append(
-                {
-                    "id": chunk.id,
-                    "lang": chunk.language,
-                    "tag": tag,
-                    "score": score,
-                    "excerpt": content[: min(addition, 400)],
-                }
-            )
+                break
+            selected.append((chunk, score))
             running += addition
 
-        return ok_response({"chunks": selected})
+        response_chunks = [
+            {
+                "id": chunk.id,
+                "lang": chunk.language,
+                "tag": (chunk.metadata or {}).get("tag") or (chunk.tags[0] if chunk.tags else ""),
+                "score": float(score),
+                "excerpt": content[:char_budget],
+            }
+            for chunk, score in selected
+            if (content := chunk.content.strip())
+        ]
+
+        return ok_response({"chunks": response_chunks})
 
 
 class ClinicWhatsAppStatusView(APIView):
@@ -2953,3 +2948,5 @@ class ClinicPatientDetailView(APIView):
         )
         
         return ok_response({"message": "Patient deleted successfully"})
+
+
