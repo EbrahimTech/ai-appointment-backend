@@ -59,6 +59,10 @@ class DialogOrchestrator:
         response_text: str | None = None
         queue_session = True
 
+        # إذا كان التحويل للبشري مفعلاً، لا نرد تلقائياً
+        if conversation.handoff_required:
+            return None, "handoff"
+
         if intent == "book":
             self.fsm.apply(conversation, "qualified", context={"message": body, "is_off_topic": False})
             slots = suggest_slots(conversation.clinic)

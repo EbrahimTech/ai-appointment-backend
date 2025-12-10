@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
+import { ShieldAlert } from "lucide-react";
 
 type Message = {
   id: number;
@@ -140,6 +141,24 @@ export default function ConversationDetailPage() {
     },
   });
 
+  const resolveHandoff = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(
+        `/api/proxy/clinic/${slug}/conversations/${conversationId}/handoff/resolve`,
+        { method: "POST" }
+      );
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "RESOLVE_FAILED");
+      }
+      return payload.data;
+    },
+    onSuccess: () => {
+      conversationQuery.refetch();
+      templatesQuery.refetch();
+    },
+  });
+
   if (conversationQuery.isPending) {
     return (
       <main className="flex min-h-screen items-center justify-center">
@@ -227,6 +246,25 @@ export default function ConversationDetailPage() {
             </p>
           </div>
         </header>
+
+        {conversation.handoff ? (
+          <div className="mt-4 flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4" />
+              <div>
+                <p className="font-semibold">Handoff required</p>
+                <p className="text-xs">Automation paused. Please respond manually, then mark as resolved to resume.</p>
+              </div>
+            </div>
+            <button
+              onClick={() => resolveHandoff.mutate()}
+              disabled={resolveHandoff.isPending}
+              className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              {resolveHandoff.isPending ? "Updating..." : "Mark resolved"}
+            </button>
+          </div>
+        ) : null}
 
         <div className="mt-6 space-y-4">
           {conversation.messages.map((message) => (
