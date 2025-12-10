@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Tuple
 
 from django.conf import settings
@@ -45,7 +46,10 @@ class DialogOrchestrator:
     ) -> Tuple[str | None, str]:
         normalized = normalize_text(body)
         intent = detect_intent(normalized)
-        ConversationMessage.objects.create(
+        previous_inbound = (
+            conversation.messages.filter(direction="inbound").order_by("-created_at").first()
+        )
+        inbound_message = ConversationMessage.objects.create(
             conversation=conversation,
             direction="inbound",
             language=language,
@@ -58,6 +62,68 @@ class DialogOrchestrator:
         session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
         response_text: str | None = None
         queue_session = True
+        suppress_duplicate = False
+        repeat_tracker = session_state.context.get("repeat_tracker", {"intent": intent, "count": 0})
+
+        # Suppress auto-replies for rapid duplicate messages (same normalized text)
+        duplicate_window_minutes = int(getattr(settings, "WHATSAPP_DUPLICATE_SUPPRESS_MINUTES", 5))
+        if previous_inbound and previous_inbound.normalized_body == normalized:
+            if (timezone.now() - previous_inbound.created_at) <= timedelta(minutes=duplicate_window_minutes):
+                suppress_duplicate = True
+
+        if suppress_duplicate:
+            logger.info(
+                "Suppressing duplicate inbound for conversation %s within %s minutes",
+                conversation.id,
+                duplicate_window_minutes,
+            )
+            return None, intent
+
+        # Track repeated unproductive intents to auto-handoff
+        productive_intents = {"book", "confirm", "cancel", "reschedule"}
+        repeat_threshold = int(getattr(settings, "WHATSAPP_REPEAT_HANDOFF_THRESHOLD", 3))
+
+        if intent in productive_intents:
+            repeat_tracker = {"intent": intent, "count": 0}
+        else:
+            if repeat_tracker.get("intent") == intent:
+                repeat_tracker["count"] += 1
+            else:
+                repeat_tracker = {"intent": intent, "count": 1}
+
+        session_state.context["repeat_tracker"] = repeat_tracker
+        session_state.save(update_fields=["context", "updated_at"])
+
+        if (
+            repeat_tracker.get("intent") not in productive_intents
+            and repeat_tracker.get("count", 0) >= repeat_threshold
+        ):
+            conversation.handoff_required = True
+            conversation.save(update_fields=["handoff_required", "updated_at"])
+            try:
+                from apps.accounts.notifications import notify_handoff
+
+                notify_handoff(conversation)
+            except Exception as err:  # pragma: no cover - best effort logging
+                logger.warning("Failed to create handoff notification: %s", err)
+
+            response_text = AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+            ConversationMessage.objects.create(
+                conversation=conversation,
+                direction="outbound",
+                language=language,
+                body=response_text,
+                intent="handoff",
+                metadata={"auto_reply": True, "reason": "repeat_intent_threshold"},
+            )
+            enqueue_whatsapp_session_message(
+                clinic_id=conversation.clinic_id,
+                conversation=conversation,
+                language=language,
+                message_body=response_text,
+                idempotency_key=f"handoff:{conversation.id}:{inbound_message.id}",
+            )
+            return response_text, "handoff"
 
         # إذا كان التحويل للبشري مفعلاً، لا نرد تلقائياً
         if conversation.handoff_required:
@@ -140,6 +206,8 @@ class DialogOrchestrator:
                     conversation=conversation,
                     language=language,
                     message_body=response_text,
+                    # Ensure each inbound message yields its own outbound send, even if text matches
+                    idempotency_key=f"{conversation.id}:{inbound_message.id}",
                 )
         return response_text, intent
 
