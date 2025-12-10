@@ -300,7 +300,7 @@ def _process_whatsapp_status(status: Dict[str, Any]) -> None:
         outbox.metadata["provider_status"] = status
         outbox.save(update_fields=["status", "last_error", "metadata", "updated_at"])
     elif status_type in ["sent", "read"]:
-        if outbox.status == OutboxStatus.QUEUED:
+        if outbox.status in {OutboxStatus.PENDING, OutboxStatus.SENDING}:
             outbox.status = OutboxStatus.SENT
             outbox.metadata["provider_status"] = status
             outbox.save(update_fields=["status", "metadata", "updated_at"])
