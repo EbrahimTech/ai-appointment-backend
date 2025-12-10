@@ -1,8 +1,9 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -20,6 +21,7 @@ import {
   Briefcase,
   ArrowLeft,
   Building2,
+  Bell,
 } from "lucide-react";
 
 type NavItem = {
@@ -36,6 +38,22 @@ export default function ClinicLayout({ children }: { children: ReactNode }) {
   const slug = params.slug;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isHQStaff, setIsHQStaff] = useState(false);
+  const notificationsQuery = useQuery({
+    queryKey: ["notifications-count", slug],
+    queryFn: async () => {
+      const response = await fetch(`/api/proxy/clinic/${slug}/notifications?status=new&limit=1`);
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Failed to load notifications");
+      }
+      const items = payload.data?.items || [];
+      return items.length;
+    },
+    staleTime: 30000,
+    refetchInterval: 30000,
+    retry: 1,
+  });
+  const unreadNotifications = notificationsQuery.data ?? 0;
 
   // Check if user is HQ staff
   useEffect(() => {
@@ -56,19 +74,23 @@ export default function ClinicLayout({ children }: { children: ReactNode }) {
     checkHQRole();
   }, []);
 
-  const navItems: NavItem[] = [
-    { href: `/c/${slug}/dashboard`, label: "Dashboard", icon: LayoutDashboard },
-    { href: `/c/${slug}/onboarding`, label: "Setup Checklist", icon: CheckSquare },
-    { href: `/c/${slug}/conversations`, label: "Conversations", icon: MessageSquare },
-    { href: `/c/${slug}/appointments`, label: "Appointments", icon: Calendar },
-    { href: `/c/${slug}/patients`, label: "Patients", icon: Users },
-    { href: `/c/${slug}/templates`, label: "Templates", icon: FileText },
-    { href: `/c/${slug}/services`, label: "Services & Hours", icon: Briefcase },
-    { href: `/c/${slug}/users`, label: "Team", icon: Users },
-    { href: `/c/${slug}/integrations`, label: "Integrations", icon: Plug },
-    { href: `/c/${slug}/knowledge`, label: "Knowledge Base", icon: BookOpen },
-    { href: `/c/${slug}/settings`, label: "Settings", icon: Settings },
-  ];
+  const navItems: NavItem[] = useMemo(
+    () => [
+      { href: `/c/${slug}/dashboard`, label: "Dashboard", icon: LayoutDashboard },
+      { href: `/c/${slug}/onboarding`, label: "Setup Checklist", icon: CheckSquare },
+      { href: `/c/${slug}/conversations`, label: "Conversations", icon: MessageSquare },
+      { href: `/c/${slug}/notifications`, label: "Notifications", icon: Bell, badge: unreadNotifications || undefined },
+      { href: `/c/${slug}/appointments`, label: "Appointments", icon: Calendar },
+      { href: `/c/${slug}/patients`, label: "Patients", icon: Users },
+      { href: `/c/${slug}/templates`, label: "Templates", icon: FileText },
+      { href: `/c/${slug}/services`, label: "Services & Hours", icon: Briefcase },
+      { href: `/c/${slug}/users`, label: "Team", icon: Users },
+      { href: `/c/${slug}/integrations`, label: "Integrations", icon: Plug },
+      { href: `/c/${slug}/knowledge`, label: "Knowledge Base", icon: BookOpen },
+      { href: `/c/${slug}/settings`, label: "Settings", icon: Settings },
+    ],
+    [slug, unreadNotifications]
+  );
 
   const handleLogout = async () => {
     await fetch("/api/session/logout", { method: "POST" });
@@ -193,4 +215,3 @@ export default function ClinicLayout({ children }: { children: ReactNode }) {
     </div>
   );
 }
-

@@ -44,6 +44,67 @@ class StaffAccount(TimeStampedModel):
         return f"{self.user.email} ({self.role})"
 
 
+class NotificationType(models.TextChoices):
+    """Types of notifications emitted for clinic operators."""
+
+    HANDOFF = "handoff", "Handoff"
+
+
+class NotificationStatus(models.TextChoices):
+    """Lifecycle of a notification."""
+
+    NEW = "new", "New"
+    READ = "read", "Read"
+
+
+class Notification(TimeStampedModel):
+    """Operator-facing alerts scoped to a clinic (e.g., handoff required)."""
+
+    clinic = models.ForeignKey(
+        Clinic, on_delete=models.CASCADE, related_name="notifications"
+    )
+    conversation = models.ForeignKey(
+        "conversations.Conversation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notifications",
+    )
+    patient = models.ForeignKey(
+        "patients.Patient",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notifications",
+    )
+    type = models.CharField(
+        max_length=20, choices=NotificationType.choices, default=NotificationType.HANDOFF
+    )
+    status = models.CharField(
+        max_length=10, choices=NotificationStatus.choices, default=NotificationStatus.NEW, db_index=True
+    )
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True)
+    patient_name = models.CharField(max_length=255, blank=True)
+    patient_phone = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["clinic", "status"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["conversation", "type"],
+                name="unique_notification_per_conversation_type",
+                condition=models.Q(conversation__isnull=False),
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"Notification<{self.id}> {self.type} {self.status}"
+
+
 class AuditLog(TimeStampedModel):
     """Audit records for critical actions."""
 

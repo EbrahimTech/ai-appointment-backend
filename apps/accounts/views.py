@@ -25,7 +25,14 @@ from rest_framework.views import APIView
 from django.conf import settings
 
 from apps.accounts.decorators import require_clinic_role, require_hq_role
-from apps.accounts.models import AuditLog, ClinicMembership, Invitation, SupportSession
+from apps.accounts.models import (
+    AuditLog,
+    ClinicMembership,
+    Invitation,
+    SupportSession,
+    Notification,
+    NotificationStatus,
+)
 from apps.accounts.support import hash_support_token, sign_invitation_token
 from apps.appointments.models import Appointment, AppointmentStatus, AppointmentSyncState
 from apps.channels.models import (
@@ -2624,6 +2631,68 @@ class ClinicSettingsView(APIView):
         return ok_response(data)
 
 
+class ClinicNotificationListView(APIView):
+    """List notifications for a clinic (e.g., handoff alerts)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+            ClinicMembership.Role.VIEWER,
+        ]
+    )
+    def get(self, request, slug: str):
+        clinic: Clinic = request.clinic
+        status_param = (request.GET.get("status") or "").lower()
+        qs = Notification.objects.filter(clinic=clinic).order_by("-created_at")
+        if status_param in {NotificationStatus.NEW, NotificationStatus.READ}:
+            qs = qs.filter(status=status_param)
+
+        limit = min(max(int(request.GET.get("limit", 50)), 1), 200)
+        items = [
+            {
+                "id": n.id,
+                "title": n.title,
+                "body": n.body,
+                "patient_name": n.patient_name,
+                "patient_phone": n.patient_phone,
+                "conversation_id": n.conversation_id,
+                "status": n.status,
+                "type": n.type,
+                "created_at": n.created_at.isoformat(),
+            }
+            for n in qs[:limit]
+        ]
+        return ok_response({"items": items})
+
+
+class ClinicNotificationMarkReadView(APIView):
+    """Mark a clinic notification as read."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+            ClinicMembership.Role.VIEWER,
+        ]
+    )
+    def post(self, request, slug: str, notification_id: int):
+        clinic: Clinic = request.clinic
+        notification = Notification.objects.filter(id=notification_id, clinic=clinic).first()
+        if notification is None:
+            return error_response("NOT_FOUND", status_code=404)
+        if notification.status != NotificationStatus.READ:
+            notification.status = NotificationStatus.READ
+            notification.save(update_fields=["status", "updated_at"])
+        return ok_response({"id": notification.id, "status": notification.status})
+
+
 class ClinicPatientListView(APIView):
     """Manage clinic patients (list, create)."""
 
@@ -2948,5 +3017,3 @@ class ClinicPatientDetailView(APIView):
         )
         
         return ok_response({"message": "Patient deleted successfully"})
-
-

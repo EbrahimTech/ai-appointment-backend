@@ -213,6 +213,12 @@ class LLMRouter:
         if guardrails["not_understood"] >= 2 and conversation and not conversation.handoff_required:
             conversation.handoff_required = True
             conversation.save(update_fields=["handoff_required", "updated_at"])
+            try:
+                from apps.accounts.notifications import notify_handoff
+
+                notify_handoff(conversation)
+            except Exception as exc:  # pragma: no cover - best effort log
+                logger.warning("Failed to create handoff notification: %s", exc)
 
     def _system_prompt(self) -> str:
         return (

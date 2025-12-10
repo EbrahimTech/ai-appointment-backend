@@ -111,8 +111,15 @@ class DialogOrchestrator:
                     response_text = (
                         AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
                     )
-                    conversation.handoff_required = True
-                    conversation.save(update_fields=["handoff_required", "updated_at"])
+                    if not conversation.handoff_required:
+                        conversation.handoff_required = True
+                        conversation.save(update_fields=["handoff_required", "updated_at"])
+                        try:
+                            from apps.accounts.notifications import notify_handoff
+
+                            notify_handoff(conversation)
+                        except Exception as err:  # pragma: no cover - best effort logging
+                            logger.warning("Failed to create handoff notification: %s", err)
 
         if response_text:
             ConversationMessage.objects.create(
