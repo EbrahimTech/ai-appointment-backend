@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from decimal import Decimal
 from typing import Iterable, List, Tuple
 
@@ -15,6 +16,7 @@ from apps.clinics.models import Clinic, LanguageChoices
 from apps.conversations.models import Conversation, SessionState
 from apps.kb.models import KnowledgeChunk, KnowledgeIndex
 from apps.llm.models import LLMProvider, LLMRequestLog, RetrievalLog
+from apps.appointments.scheduling import suggest_slots
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,12 @@ class LLMRouter:
 
         chunks = self._retrieve_chunks(clinic, language)
         context_text, grounded_chunks = self._build_context(chunks)
-        if not grounded_chunks:
+        # add live clinic snapshot (services/pricing/slots)
+        snapshot = self._clinic_snapshot(clinic)
+        if snapshot:
+            context_text = snapshot + "\n\n" + context_text
+
+        if not grounded_chunks and not snapshot:
             self._register_not_understood(session_state, conversation)
             raise LLMRouterError("rag_context_missing")
 
@@ -175,6 +182,85 @@ class LLMRouter:
 
         return content
 
+    # ------------------------------------------------------------------ intent classification
+    def classify_intent(
+        self,
+        *,
+        clinic: Clinic,
+        language: str,
+        prompt: str,
+    ) -> dict | None:
+        """
+        Lightweight intent/slot extraction with strict JSON output.
+        Returns dict or raises LLMRouterError on provider issues.
+        """
+        if not self.api_key:
+            raise LLMRouterError("DeepSeek API key not configured.")
+
+        model = getattr(settings, "LLM_INTENT_MODEL", self.model)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a dental clinic virtual assistant. "
+                    "You MUST answer with a single JSON object only. No prose. "
+                    "Fields: intent (book|confirm|cancel|reschedule|clarify|off_topic), "
+                    "confidence (0-1), time_text, service_text, language_guess, summary. "
+                    "If off-topic, set intent='off_topic'. "
+                    "If unsure, set intent='clarify' with confidence<=0.4. "
+                    "Do NOT invent pricing/policies; do NOT leave JSON. "
+                    "Keep summary max 20 words."
+                ),
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ]
+
+        try:
+            response = requests.post(
+                f"{self.api_base}/v1/chat/completions",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": 0,
+                    "max_tokens": 200,
+                },
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=getattr(settings, "LLM_TIMEOUT_SECONDS", 15),
+            )
+        except requests.Timeout as exc:  # pragma: no cover - network path
+            raise LLMRouterError("llm_timeout") from exc
+
+        if response.status_code >= 400:
+            logger.error("DeepSeek intent error %s: %s", response.status_code, response.text)
+            raise LLMRouterError("llm_provider_error")
+
+        payload = response.json()
+        content = payload["choices"][0]["message"]["content"].strip()
+
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            logger.warning("Intent parsing failed, content: %s", content)
+            raise LLMRouterError("llm_parse_error")
+
+        # Basic sanitization/defaults
+        intent = (parsed.get("intent") or "clarify").lower()
+        confidence = float(parsed.get("confidence", 0))
+        parsed["intent"] = intent
+        parsed["confidence"] = confidence
+        parsed.setdefault("time_text", "")
+        parsed.setdefault("service_text", "")
+        parsed.setdefault("language_guess", language)
+        parsed.setdefault("summary", "")
+
+        return parsed
+
     # ------------------------------------------------------------------ helpers
     def _budget_available(self) -> bool:
         if not self.daily_budget:
@@ -223,11 +309,11 @@ class LLMRouter:
     def _system_prompt(self) -> str:
         return (
             "You are an appointment assistant for a dental clinic.\n"
-            "- Only answer with facts from the supplied context.\n"
-            "- Never invent pricing, policies, or medical advice. If missing, reply with \"I'm sorry, I don't have that information.\"\n"
-            "- Keep responses under two sentences.\n"
-            "- If the user goes off-topic, politely state so in one sentence and steer back to dental appointments.\n"
-            "- Stay professional and concise."
+            "- Use ONLY the facts in the provided context (services, prices, durations, slots).\n"
+            "- Never invent or guess. If information is missing, say you don't have it.\n"
+            "- Keep responses under two sentences; be concise and patient-friendly.\n"
+            "- If off-topic, say so and steer back to dental appointments.\n"
+            "- Do not provide medical advice or pricing not present in context."
         )
 
     def _build_context(self, chunks: List[KnowledgeChunk]) -> Tuple[str, List[KnowledgeChunk]]:
@@ -246,6 +332,42 @@ class LLMRouter:
             running += addition
             selected.append(chunk)
         return "\n".join(parts), selected
+
+    def _clinic_snapshot(self, clinic: Clinic) -> str:
+        """Build real-time context from DB (services, pricing, durations, next slots)."""
+        lines: list[str] = []
+
+        try:
+            services = clinic.services.filter(is_active=True).order_by("name")[:20]
+        except Exception:
+            services = []
+
+        if services:
+            lines.append("Services:")
+            for svc in services:
+                price = getattr(svc, "price", None)
+                duration = getattr(svc, "duration_minutes", None)
+                parts = [f"- {svc.code}: {svc.name}"]
+                if duration:
+                    parts.append(f"{duration} min")
+                if price is not None:
+                    parts.append(f"price: {price}")
+                lines.append(", ".join(parts))
+
+        try:
+            slots = suggest_slots(clinic)
+        except Exception:
+            slots = []
+
+        if slots:
+            lines.append("Next available slots:")
+            tz = clinic.tz or "UTC"
+            for slot in slots[:3]:
+                start = slot.start.astimezone(slot.start.tzinfo)
+                label = start.strftime("%Y-%m-%d %H:%M")
+                lines.append(f"- {label} ({tz})")
+
+        return "\n".join(lines)
 
     def _retrieve_chunks(self, clinic: Clinic, language: str) -> List[KnowledgeChunk]:
         desired_language = language or LanguageChoices.ENGLISH

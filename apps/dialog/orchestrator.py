@@ -46,6 +46,26 @@ class DialogOrchestrator:
     ) -> Tuple[str | None, str]:
         normalized = normalize_text(body)
         intent = detect_intent(normalized)
+        # LLM intent fallback (structured) to better understand Arabic/free-form requests
+        if intent == "clarify" and getattr(settings, "LLM_INTENT_ENABLED", True):
+            try:
+                intent_result = self.llm_router.classify_intent(
+                    clinic=conversation.clinic,
+                    language=language,
+                    prompt=body,
+                )
+                if intent_result:
+                    conf = intent_result.get("confidence", 0)
+                    threshold = float(getattr(settings, "LLM_INTENT_CONF_THRESHOLD", 0.55))
+                    if conf >= threshold and intent_result.get("intent") != "off_topic":
+                        intent = intent_result.get("intent", intent)
+                    session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
+                    session_state.context["llm_intent"] = intent_result
+                    session_state.save(update_fields=["context", "updated_at"])
+            except LLMRouterError as exc:
+                logger.warning("LLM intent fallback skipped: %s", exc)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("LLM intent fallback error: %s", exc, exc_info=True)
         previous_inbound = (
             conversation.messages.filter(direction="inbound").order_by("-created_at").first()
         )
@@ -63,7 +83,11 @@ class DialogOrchestrator:
         response_text: str | None = None
         queue_session = True
         suppress_duplicate = False
-        repeat_tracker = session_state.context.get("repeat_tracker", {"intent": intent, "count": 0})
+        now = timezone.now()
+        repeat_tracker = session_state.context.get(
+            "repeat_tracker",
+            {"intent": intent, "count": 0, "last_seen": now.isoformat()},
+        )
 
         # Suppress auto-replies for rapid duplicate messages (same normalized text)
         duplicate_window_minutes = int(getattr(settings, "WHATSAPP_DUPLICATE_SUPPRESS_MINUTES", 5))
@@ -82,14 +106,31 @@ class DialogOrchestrator:
         # Track repeated unproductive intents to auto-handoff
         productive_intents = {"book", "confirm", "cancel", "reschedule"}
         repeat_threshold = int(getattr(settings, "WHATSAPP_REPEAT_HANDOFF_THRESHOLD", 3))
+        repeat_window_minutes = int(
+            getattr(settings, "WHATSAPP_REPEAT_RESET_MINUTES", 30)
+        )
+
+        last_seen_iso = repeat_tracker.get("last_seen")
+        try:
+            last_seen = timezone.datetime.fromisoformat(last_seen_iso) if last_seen_iso else None
+            if last_seen and timezone.is_naive(last_seen):
+                last_seen = timezone.make_aware(last_seen)
+        except Exception:
+            last_seen = None
+
+        within_window = False
+        if last_seen:
+            within_window = (now - last_seen) <= timedelta(minutes=repeat_window_minutes)
 
         if intent in productive_intents:
-            repeat_tracker = {"intent": intent, "count": 0}
+            repeat_tracker = {"intent": intent, "count": 0, "last_seen": now.isoformat()}
         else:
-            if repeat_tracker.get("intent") == intent:
+            if repeat_tracker.get("intent") == intent and within_window:
                 repeat_tracker["count"] += 1
             else:
-                repeat_tracker = {"intent": intent, "count": 1}
+                repeat_tracker = {"intent": intent, "count": 1, "last_seen": now.isoformat()}
+
+        repeat_tracker["last_seen"] = now.isoformat()
 
         session_state.context["repeat_tracker"] = repeat_tracker
         session_state.save(update_fields=["context", "updated_at"])
@@ -100,6 +141,9 @@ class DialogOrchestrator:
         ):
             conversation.handoff_required = True
             conversation.save(update_fields=["handoff_required", "updated_at"])
+            # reset repeat tracker to avoid immediate retrigger after manual handoff clear
+            session_state.context["repeat_tracker"] = {"intent": intent, "count": 0, "last_seen": now.isoformat()}
+            session_state.save(update_fields=["context", "updated_at"])
             try:
                 from apps.accounts.notifications import notify_handoff
 
