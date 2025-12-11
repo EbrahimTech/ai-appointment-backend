@@ -708,6 +708,8 @@ class ClinicServiceAdminView(APIView):
 
                 if not code or not name:
                     return error_response("INVALID_SERVICE", status_code=400)
+                if language not in ("ar", "en"):
+                    return error_response("INVALID_SERVICE_LANGUAGE", status_code=400)
                 try:
                     duration_minutes = int(duration)
                 except (TypeError, ValueError):
@@ -921,6 +923,12 @@ class ClinicTemplateListView(APIView):
         
         if not code or not body:
             return error_response("INVALID_PAYLOAD", status_code=400)
+
+        if not (
+            language in ("ar", "en")
+            or (code == "hello_world" and language == "en_US")
+        ):
+            return error_response("INVALID_TEMPLATE_LANGUAGE", status_code=400)
         
         # Check if template already exists
         existing = clinic.message_templates.filter(code=code, language=language).first()
@@ -988,6 +996,12 @@ class ClinicTemplateListView(APIView):
                 if not code:
                     return error_response("INVALID_TEMPLATE", status_code=400)
 
+                if not (
+                    language in ("ar", "en")
+                    or (code == "hello_world" and language == "en_US")
+                ):
+                    return error_response("INVALID_TEMPLATE_LANGUAGE", status_code=400)
+
                 template = clinic.message_templates.filter(code=code, language=language).first()
                 if template is None:
                     return error_response("INVALID_TEMPLATE", status_code=400)
@@ -1034,6 +1048,12 @@ class ClinicTemplateListView(APIView):
                 language = str(entry.get("lang", entry.get("language", clinic.default_lang))).strip() or clinic.default_lang
                 if not code:
                     return error_response("INVALID_TEMPLATE", status_code=400)
+
+                if not (
+                    language in ("ar", "en")
+                    or (code == "hello_world" and language == "en_US")
+                ):
+                    return error_response("INVALID_TEMPLATE_LANGUAGE", status_code=400)
                 template = clinic.message_templates.filter(code=code, language=language).first()
                 if template is None:
                     return error_response("INVALID_TEMPLATE", status_code=400)

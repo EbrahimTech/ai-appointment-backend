@@ -284,7 +284,6 @@ export default function TemplatesPage() {
             <option value="">All Languages</option>
             <option value="ar">Arabic</option>
             <option value="en">English</option>
-            <option value="en_US">English (US)</option>
           </select>
             </div>
             <div className="flex-1 max-w-md">
@@ -394,9 +393,11 @@ export default function TemplatesPage() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            template.lang === 'ar' ? 'bg-amber-100 text-amber-700' : 
-                            template.lang === 'en_US' ? 'bg-blue-100 text-blue-700' : 
-                            'bg-green-100 text-green-700'
+                            template.lang === 'ar'
+                              ? 'bg-amber-100 text-amber-700'
+                              : template.lang === 'en_US'
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-green-100 text-green-700'
                           }`}
                         >
                           {template.lang === 'ar' ? 'Arabic' : 
@@ -567,10 +568,9 @@ export default function TemplatesPage() {
                       >
                         <option value="ar">Arabic</option>
                         <option value="en">English</option>
-                        <option value="en_US">English (US)</option>
                       </select>
                       <p className="text-xs text-gray-500">
-                        ⚠️ يجب أن تطابق اللغة في Meta: English = en, English (US) = en_US
+                        ⚠️ يجب أن تطابق اللغة في Meta: English = en
                       </p>
                     </div>
                   </div>

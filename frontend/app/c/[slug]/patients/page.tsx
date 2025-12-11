@@ -47,7 +47,7 @@ const patientSchema = z.object({
   current_medications: z.string().optional(),
   blood_type: z.string().optional(),
   notes: z.string().optional(),
-  language: z.enum(["en", "ar", "en_US"]),
+  language: z.enum(["en", "ar"]),
 });
 
 export default function PatientsPage() {
@@ -69,7 +69,7 @@ export default function PatientsPage() {
   const [formPhone, setFormPhone] = useState("");
   const [formAltPhone, setFormAltPhone] = useState("");
   const [formEmail, setFormEmail] = useState("");
-  const [formLanguage, setFormLanguage] = useState<"en" | "ar" | "en_US">("ar");
+  const [formLanguage, setFormLanguage] = useState<"en" | "ar">("ar");
   
   // Form states - Personal Info
   const [formDOB, setFormDOB] = useState("");
@@ -215,7 +215,7 @@ export default function PatientsPage() {
     setFormPhone(patient.phone_number);
     setFormAltPhone(patient.alternative_phone || "");
     setFormEmail(patient.email || "");
-    setFormLanguage(patient.language as "en" | "ar" | "en_US");
+    setFormLanguage((patient.language as "en" | "ar") || "ar");
     setFormDOB(patient.date_of_birth || "");
     setFormGender((patient.gender as "male" | "female" | "other") || "");
     setFormEmergencyName(patient.emergency_contact_name || "");
@@ -486,15 +486,11 @@ export default function PatientsPage() {
                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                             patient.language === "ar"
                               ? "bg-amber-100 text-amber-700"
-                              : patient.language === "en_US"
-                              ? "bg-blue-100 text-blue-700"
                               : "bg-green-100 text-green-700"
                           }`}
                         >
                           {patient.language === "ar"
                             ? "Arabic"
-                            : patient.language === "en_US"
-                            ? "English (US)"
                             : "English"}
                         </span>
                       </td>
@@ -640,7 +636,6 @@ export default function PatientsPage() {
                         >
                           <option value="ar">Arabic</option>
                           <option value="en">English</option>
-                          <option value="en_US">English (US)</option>
                         </select>
                       </div>
                     </div>
