@@ -91,7 +91,7 @@ class CompatDateTimeRangeField(DateTimeRangeField):
             return None
 
         if not prepared:
-        value = super().get_prep_value(value)
+            value = super().get_prep_value(value)
 
         lower = getattr(value, "lower", None)
         upper = getattr(value, "upper", None)
