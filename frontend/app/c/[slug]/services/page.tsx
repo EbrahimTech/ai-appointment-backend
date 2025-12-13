@@ -850,8 +850,8 @@ export default function ServicesPage() {
                       Delete
                     </button>
                   </div>
-                </div>
-                <div className="grid gap-4 md:grid-cols-3">
+        </div>
+              <div className="grid gap-4 md:grid-cols-3">
                 <Field label="Code">
                   <input
                     name={`service_code_${index}`}
@@ -920,7 +920,7 @@ export default function ServicesPage() {
                   />
                 </Field>
               </div>
-              </div>
+            </div>
             );
           })}
           <button
@@ -931,7 +931,7 @@ export default function ServicesPage() {
               <Save className="w-4 h-4" />
               <span>{updateServices.isPending ? "Saving..." : "Save Services"}</span>
           </button>
-          </form>
+        </form>
           </div>
 
           {/* Service Hours Section */}
@@ -1041,7 +1041,7 @@ export default function ServicesPage() {
                       Delete
                     </button>
                   </div>
-                </div>
+        </div>
               <div className="grid gap-4 md:grid-cols-4">
                   <Field label="Service Code">
                   <input
@@ -1067,29 +1067,29 @@ export default function ServicesPage() {
                   />
                 </Field>
                   <Field label="Start Time (HH:MM)">
-                    <input
-                      name={`hour_start_${index}`}
+                  <input
+                    name={`hour_start_${index}`}
                       type="time"
                     defaultValue={isExisting ? hour.start_time : ""}
                     placeholder="09:00"
                     onChange={() => handleHourFieldChange(index, isExisting)}
                         className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
+                    required
+                  />
+                </Field>
                   <Field label="End Time (HH:MM)">
-                    <input
-                      name={`hour_end_${index}`}
+                  <input
+                    name={`hour_end_${index}`}
                       type="time"
                     defaultValue={isExisting ? hour.end_time : ""}
                     placeholder="17:00"
                     onChange={() => handleHourFieldChange(index, isExisting)}
                         className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      required
-                    />
-                  </Field>
+                    required
+                  />
+                </Field>
               </div>
-              </div>
+            </div>
             );
           })}
           <button
@@ -1100,7 +1100,7 @@ export default function ServicesPage() {
               <Save className="w-4 h-4" />
               <span>{updateHours.isPending ? "Saving..." : "Save Hours"}</span>
           </button>
-          </form>
+        </form>
           </div>
         </div>
 
