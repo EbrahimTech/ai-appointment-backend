@@ -91,7 +91,7 @@ class CompatDateTimeRangeField(DateTimeRangeField):
             return None
 
         if not prepared:
-            value = super().get_prep_value(value)
+        value = super().get_prep_value(value)
 
         lower = getattr(value, "lower", None)
         upper = getattr(value, "upper", None)
@@ -131,10 +131,10 @@ class CompatDateTimeRangeField(DateTimeRangeField):
         else:
             return value
 
-        lower = payload.get("lower")
-        upper = payload.get("upper")
-        lower_dt = datetime.fromisoformat(lower) if lower else None
-        upper_dt = datetime.fromisoformat(upper) if upper else None
+            lower = payload.get("lower")
+            upper = payload.get("upper")
+            lower_dt = datetime.fromisoformat(lower) if lower else None
+            upper_dt = datetime.fromisoformat(upper) if upper else None
 
         # Ensure timezone-aware values
         lower_dt = timezone.make_aware(lower_dt) if lower_dt and lower_dt.tzinfo is None else lower_dt
