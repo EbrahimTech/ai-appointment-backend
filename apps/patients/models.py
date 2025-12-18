@@ -13,6 +13,7 @@ class Patient(TimeStampedModel):
     clinic = models.ForeignKey(
         Clinic, on_delete=models.CASCADE, related_name="patients"
     )
+    ai_enabled = models.BooleanField(default=True)
     
     # Basic Information
     full_name = models.CharField(max_length=255)
@@ -92,4 +93,3 @@ class PatientNote(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"Note for {self.patient.full_name}"
-

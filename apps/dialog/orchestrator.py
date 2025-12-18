@@ -104,7 +104,11 @@ class DialogOrchestrator:
             return None, intent
 
         # Respect clinic-level AI toggle: pause automation and alert operators
-        if not conversation.clinic.ai_enabled:
+        patient_ai_enabled = True
+        if getattr(conversation, "patient", None) and conversation.patient.ai_enabled is False:
+            patient_ai_enabled = False
+
+        if not conversation.clinic.ai_enabled or not patient_ai_enabled:
             if not conversation.handoff_required:
                 conversation.handoff_required = True
                 conversation.save(update_fields=["handoff_required", "updated_at"])

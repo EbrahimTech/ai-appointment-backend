@@ -19,6 +19,11 @@ type ConversationDetail = {
   lang: string;
   fsm_state: string;
   handoff: boolean;
+  patient: {
+    id: number | null;
+    full_name: string;
+    ai_enabled: boolean;
+  } | null;
   messages: Message[];
 };
 
@@ -49,6 +54,7 @@ export default function ConversationDetailPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replyMessage, setReplyMessage] = useState<string | null>(null);
+  const [aiToggleMessage, setAiToggleMessage] = useState<string | null>(null);
 
   const conversationQuery = useQuery({
     queryKey: ["conversation-detail", slug, conversationId],
@@ -167,6 +173,28 @@ export default function ConversationDetailPage() {
     },
   });
 
+  const togglePatientAI = useMutation({
+    mutationFn: async (input: { patient_id: number; ai_enabled: boolean }) => {
+      const response = await fetch(`/api/proxy/clinic/${slug}/patients/${input.patient_id}/ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ai_enabled: input.ai_enabled }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "TOGGLE_FAILED");
+      }
+      return payload.data;
+    },
+    onSuccess: () => {
+      setAiToggleMessage("تم تحديث حالة الذكاء الاصطناعي لهذا العميل.");
+      conversationQuery.refetch();
+    },
+    onError: (err: Error) => {
+      setAiToggleMessage(err.message || "حدث خطأ أثناء التحديث.");
+    },
+  });
+
   if (conversationQuery.isPending) {
     return (
       <main className="flex min-h-screen items-center justify-center">
@@ -273,6 +301,8 @@ export default function ConversationDetailPage() {
     }
   }
 
+  const patient = conversation.patient;
+
   return (
     <main className="grid gap-8 px-6 py-8 lg:grid-cols-[2fr,1fr]">
       <section className="rounded-lg border bg-white p-6 shadow-sm">
@@ -348,6 +378,34 @@ export default function ConversationDetailPage() {
       </section>
 
       <aside className="space-y-6">
+        {patient?.id ? (
+          <section className="rounded-lg border bg-white p-6 shadow-sm">
+            <header className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-blue-900">إعدادات العميل</h2>
+                <p className="text-sm text-muted-foreground">تفعيل/إيقاف الرد الآلي لهذا العميل فقط.</p>
+              </div>
+              <label className="inline-flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  checked={patient.ai_enabled}
+                  onChange={(e) =>
+                    togglePatientAI.mutate({ patient_id: patient.id!, ai_enabled: e.target.checked })
+                  }
+                  disabled={togglePatientAI.isPending}
+                />
+                <span className="text-sm font-medium text-gray-800">
+                  {patient.ai_enabled ? "الذكاء الاصطناعي مفعّل" : "الذكاء الاصطناعي متوقف"}
+                </span>
+              </label>
+            </header>
+            {aiToggleMessage ? (
+              <p className="mt-2 text-sm text-gray-700">{aiToggleMessage}</p>
+            ) : null}
+          </section>
+        ) : null}
+
         <section className="rounded-lg border bg-white p-6 shadow-sm" id="reply-section">
           <header className="flex items-center justify-between">
             <div>

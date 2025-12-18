@@ -179,6 +179,11 @@ class ClinicConversationDetailView(APIView):
             "lang": _conversation_language(conversation, clinic),
             "fsm_state": conversation.fsm_state,
             "handoff": conversation.handoff_required,
+            "patient": {
+                "id": conversation.patient.id if conversation.patient else None,
+                "full_name": conversation.patient.full_name if conversation.patient else "",
+                "ai_enabled": conversation.patient.ai_enabled if conversation.patient else True,
+            },
             "messages": [
                 {
                     "id": message.id,
@@ -2891,6 +2896,7 @@ class ClinicPatientListView(APIView):
                 "blood_type": patient.blood_type or "",
                 "notes": patient.notes or "",
                 "language": patient.language,
+                "ai_enabled": patient.ai_enabled,
                 "created_at": patient.created_at.isoformat(),
             }
             for patient in patients
@@ -2980,6 +2986,7 @@ class ClinicPatientListView(APIView):
             blood_type=blood_type,
             notes=notes,
             language=language,
+            ai_enabled=True,
         )
         
         AuditLog.objects.create(
@@ -3010,6 +3017,7 @@ class ClinicPatientListView(APIView):
             "blood_type": patient.blood_type or "",
             "notes": patient.notes or "",
             "language": patient.language,
+            "ai_enabled": patient.ai_enabled,
             "created_at": patient.created_at.isoformat(),
         })
 
@@ -3059,6 +3067,7 @@ class ClinicPatientDetailView(APIView):
         blood_type = str(payload.get("blood_type", "")).strip()
         notes = str(payload.get("notes", "")).strip()
         language = str(payload.get("language", patient.language)).strip()
+        ai_enabled_raw = payload.get("ai_enabled", patient.ai_enabled)
         
         if not full_name or not phone_number:
             return error_response("INVALID_PAYLOAD", status_code=400)
@@ -3104,6 +3113,7 @@ class ClinicPatientDetailView(APIView):
         patient.blood_type = blood_type
         patient.notes = notes
         patient.language = language
+        patient.ai_enabled = bool(ai_enabled_raw)
         patient.save()
         
         AuditLog.objects.create(
@@ -3134,6 +3144,7 @@ class ClinicPatientDetailView(APIView):
             "blood_type": patient.blood_type or "",
             "notes": patient.notes or "",
             "language": patient.language,
+            "ai_enabled": patient.ai_enabled,
             "created_at": patient.created_at.isoformat(),
         })
 
@@ -3167,4 +3178,41 @@ class ClinicPatientDetailView(APIView):
         )
         
         return ok_response({"message": "Patient deleted successfully"})
+
+
+class ClinicPatientAIToggleView(APIView):
+    """Enable/disable AI for a specific patient."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+        ]
+    )
+    def post(self, request, slug: str, patient_id: int):
+        clinic: Clinic = request.clinic
+        patient = clinic.patients.filter(id=patient_id).first()
+        if not patient:
+            return error_response("PATIENT_NOT_FOUND", status_code=404)
+
+        payload = request.data or {}
+        ai_enabled = payload.get("ai_enabled")
+        if ai_enabled is None:
+            return error_response("INVALID_PAYLOAD", status_code=400)
+
+        patient.ai_enabled = bool(ai_enabled)
+        patient.save(update_fields=["ai_enabled", "updated_at"])
+
+        AuditLog.objects.create(
+            actor_user=request.user,
+            action="PATIENT_AI_TOGGLE",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta={"patient_id": patient.id, "ai_enabled": patient.ai_enabled},
+        )
+
+        return ok_response({"id": patient.id, "ai_enabled": patient.ai_enabled})
 logger = logging.getLogger(__name__)
