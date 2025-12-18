@@ -81,7 +81,7 @@ export default function NotificationsPage() {
           </div>
         ) : items.length === 0 ? (
           <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm text-center text-sm text-slate-500">
-            لا توجد تنبيهات حالياً.
+            No notifications yet.
           </div>
         ) : (
           <ul className="space-y-3">
@@ -122,7 +122,7 @@ export default function NotificationsPage() {
                   <p className="text-base font-semibold text-gray-900">{item.title}</p>
                   <p className="text-sm text-slate-700">{item.body}</p>
                   <p className="text-sm text-slate-600">
-                    المريض: {item.patient_name || "ضيف"} {item.patient_phone ? `(${item.patient_phone})` : ""}
+                    Patient: {item.patient_name || "Unknown"} {item.patient_phone ? `(${item.patient_phone})` : ""}
                   </p>
                 </div>
                 {item.conversation_id ? (
@@ -131,7 +131,7 @@ export default function NotificationsPage() {
                       href={`/c/${slug}/conversations/${item.conversation_id}`}
                       className="inline-flex items-center gap-1 text-sm font-medium text-indigo-700 hover:text-indigo-900"
                     >
-                      فتح المحادثة
+                      View conversation
                       <ArrowRight className="h-4 w-4" />
                     </Link>
                   </div>

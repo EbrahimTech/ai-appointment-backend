@@ -15,6 +15,7 @@ type ClinicInfo = {
   tz: string;
   default_lang: string;
   email: string;
+  ai_enabled: boolean;
 };
 
 export default function ClinicSettingsPage() {
@@ -102,6 +103,10 @@ export default function ClinicSettingsPage() {
   };
 
   const handleChange = (field: keyof ClinicInfo, value: string) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleToggle = (field: keyof ClinicInfo, value: boolean) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -350,6 +355,43 @@ export default function ClinicSettingsPage() {
                     </div>
                   )}
                 </div>
+            </div>
+          </div>
+
+            {/* Automation & AI */}
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">AI Assistant</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Toggle automated AI replies for this clinic.
+                  </p>
+                </div>
+                {isEditing ? (
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      checked={!!clinicData?.ai_enabled}
+                      onChange={(e) => handleToggle("ai_enabled", e.target.checked)}
+                      disabled={isReadOnly}
+                    />
+                    <span className="text-sm font-medium text-gray-800">
+                      {clinicData?.ai_enabled ? "Enabled" : "Disabled"}
+                    </span>
+                  </label>
+                ) : (
+                  <span
+                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${
+                      clinicData?.ai_enabled ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-700"
+                    }`}
+                  >
+                    {clinicData?.ai_enabled ? "AI replies ON" : "AI replies OFF"}
+                  </span>
+                )}
+              </div>
+              <div className="px-6 py-4 text-sm text-gray-600">
+                When AI is off, the assistant will pause automation and hand off chats for a human reply.
               </div>
             </div>
 

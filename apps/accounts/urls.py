@@ -8,6 +8,7 @@ from apps.accounts.views import (
     ClinicAppointmentRescheduleView,
     ClinicConversationDetailView,
     ClinicConversationListView,
+    ClinicConversationResolveHandoffView,
     ClinicDashboardView,
     ClinicGoogleCalendarStatusView,
     ClinicGoogleOAuthCallbackView,
@@ -51,6 +52,11 @@ urlpatterns = [
         "clinic/<slug:slug>/conversations/<int:pk>/reply",
         ClinicConversationDetailView.as_view(),
         name="clinic-conversation-reply",
+    ),
+    path(
+        "clinic/<slug:slug>/conversations/<int:pk>/handoff/resolve",
+        ClinicConversationResolveHandoffView.as_view(),
+        name="clinic-conversation-resolve-handoff",
     ),
     path("clinic/<slug:slug>/appointments", ClinicAppointmentListView.as_view(), name="clinic-appointments"),
     path(

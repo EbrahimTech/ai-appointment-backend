@@ -103,6 +103,19 @@ class DialogOrchestrator:
             )
             return None, intent
 
+        # Respect clinic-level AI toggle: pause automation and alert operators
+        if not conversation.clinic.ai_enabled:
+            if not conversation.handoff_required:
+                conversation.handoff_required = True
+                conversation.save(update_fields=["handoff_required", "updated_at"])
+                try:
+                    from apps.accounts.notifications import notify_handoff
+
+                    notify_handoff(conversation)
+                except Exception as err:  # pragma: no cover - best effort logging
+                    logger.warning("Failed to create handoff notification: %s", err)
+            return None, "handoff"
+
         # Track repeated unproductive intents to auto-handoff
         productive_intents = {"book", "confirm", "cancel", "reschedule"}
         repeat_threshold = int(getattr(settings, "WHATSAPP_REPEAT_HANDOFF_THRESHOLD", 3))

@@ -7,7 +7,7 @@ from apps.conversations.models import Conversation
 
 
 def notify_handoff(conversation: Conversation) -> Notification:
-    """Create or return an existing handoff notification for a conversation."""
+    """Create (or reuse) a handoff notification for this conversation."""
 
     patient = getattr(conversation, "patient", None)
     patient_name = patient.full_name if patient else "Guest"
@@ -16,8 +16,8 @@ def notify_handoff(conversation: Conversation) -> Notification:
     defaults = {
         "clinic": conversation.clinic,
         "patient": patient,
-        "title": "مطلوب تحويل إلى بشري",
-        "body": "يتطلب الرد من موظف بشري لهذه المحادثة.",
+        "title": "Handoff required",
+        "body": "The assistant paused this chat and needs a human follow-up.",
         "patient_name": patient_name,
         "patient_phone": patient_phone,
         "status": NotificationStatus.NEW,

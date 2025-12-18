@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import json
 import math
 import re
@@ -55,6 +56,7 @@ from apps.channels.services import (
     DEFAULT_SESSION_FALLBACK_HSM,
     SESSION_WINDOW_HOURS,
     enqueue_whatsapp_message,
+    enqueue_whatsapp_session_message,
 )
 from apps.workers.tasks import schedule_google_calendar_retry
 
@@ -199,89 +201,138 @@ class ClinicConversationDetailView(APIView):
     def post(self, request, slug: str, pk: int):
         clinic: Clinic = request.clinic
         data = request.data or {}
-        template_key = str(data.get("template_key", "")).strip()
-        if not template_key:
-            return error_response("INVALID_TEMPLATE", status_code=400)
+        reply_mode = data.get("reply_mode", "template")  # "template" or "direct"
+        direct_message = str(data.get("direct_message", "")).strip()
 
-        variables_raw = data.get("variables") or {}
-        if variables_raw is None:
-            variables_raw = {}
-        if not isinstance(variables_raw, dict):
-            return error_response("LINT_FAILED", status_code=400)
+        if reply_mode == "direct":
+            # Direct message mode
+            if not direct_message:
+                return error_response("MESSAGE_REQUIRED", status_code=400)
+            if len(direct_message) > 4096:  # WhatsApp limit
+                return error_response("MESSAGE_TOO_LONG", status_code=400)
+        else:
+            # Template mode (existing logic)
+            template_key = str(data.get("template_key", "")).strip()
+            if not template_key:
+                return error_response("INVALID_TEMPLATE", status_code=400)
+
+            variables_raw = data.get("variables") or {}
+            if variables_raw is None:
+                variables_raw = {}
+            if not isinstance(variables_raw, dict):
+                return error_response("LINT_FAILED", status_code=400)
 
         with transaction.atomic():
             conversation = (
-                Conversation.objects.select_for_update()
-                .select_related("patient")
-                .filter(clinic=clinic, pk=pk)
+                Conversation.objects.filter(clinic=clinic, pk=pk)
                 .first()
             )
             if conversation is None:
                 return error_response("NOT_FOUND", status_code=404)
 
             language = _conversation_language(conversation, clinic)
-            template = (
-                MessageTemplate.objects.filter(
-                    clinic=clinic,
-                    code=template_key,
-                    language=language,
-                    is_active=True,
-                ).first()
-            )
-            if template is None:
-                return error_response("INVALID_TEMPLATE", status_code=400)
 
-            variables = _normalize_variables(variables_raw)
-            expected = template.variables or []
-            missing = _missing_variables(expected, variables)
-            if missing:
-                return error_response("LINT_FAILED", status_code=400)
+            if reply_mode == "direct":
+                # Direct message - no template needed
+                rendered_body = direct_message
+                outbound_body = direct_message
+                requires_hsm = _requires_hsm(conversation)
+                hsm_template = None
+                hsm_name_to_use = None
+                variables = {}
+                template = None
 
-            rendered_body = _render_template_body(template.body, variables)
-            if "{{" in rendered_body and expected:
-                return error_response("LINT_FAILED", status_code=400)
-
-            requires_hsm = _requires_hsm(conversation)
-            template_hsm_name = (template.metadata or {}).get("hsm_name") or template.code
-
-            hsm_template = None
-            outbound_body = rendered_body
-            hsm_name_to_use = template_hsm_name or DEFAULT_SESSION_FALLBACK_HSM
-
-            if requires_hsm:
-                hsm_template = _select_hsm_template(
-                    clinic_id=clinic.id,
-                    name=template_hsm_name,
-                    language=language,
-                )
-                if hsm_template is None and DEFAULT_SESSION_FALLBACK_HSM:
+                if requires_hsm:
+                    # For direct messages that require HSM, use default session fallback
                     hsm_template = _select_hsm_template(
                         clinic_id=clinic.id,
                         name=DEFAULT_SESSION_FALLBACK_HSM,
                         language=language,
                     )
-                if hsm_template is None:
-                    return error_response("NO_HSM_AVAILABLE", status_code=400)
-                outbound_body = _render_template_body(hsm_template.body, variables)
-                hsm_name_to_use = hsm_template.name
+                    if hsm_template is None:
+                        return error_response("NO_HSM_AVAILABLE", status_code=400)
+                    outbound_body = _render_template_body(hsm_template.body, {"message": direct_message})
+                    hsm_name_to_use = hsm_template.name
 
-            idempotency_key = _build_idempotency_key(
-                conversation_id=conversation.id,
-                template_key=template.code,
-                variables=variables,
-            )
+                idempotency_key = _build_idempotency_key(
+                    conversation_id=conversation.id,
+                    template_key="direct_message",
+                    variables={"message": direct_message[:100]},  # Limit for idempotency key
+                )
+            else:
+                # Template mode (existing logic)
+                template = (
+                    MessageTemplate.objects.filter(
+                        clinic=clinic,
+                        code=template_key,
+                        language=language,
+                        is_active=True,
+                    ).first()
+                )
+                if template is None:
+                    return error_response("INVALID_TEMPLATE", status_code=400)
+
+                variables = _normalize_variables(variables_raw)
+                expected = template.variables or []
+                missing = _missing_variables(expected, variables)
+                if missing:
+                    return error_response("LINT_FAILED", status_code=400)
+
+                rendered_body = _render_template_body(template.body, variables)
+                if "{{" in rendered_body and expected:
+                    return error_response("LINT_FAILED", status_code=400)
+
+                requires_hsm = _requires_hsm(conversation)
+                template_hsm_name = (template.metadata or {}).get("hsm_name") or template.code
+
+                hsm_template = None
+                outbound_body = rendered_body
+                hsm_name_to_use = template_hsm_name or DEFAULT_SESSION_FALLBACK_HSM
+
+                if requires_hsm:
+                    hsm_template = _select_hsm_template(
+                        clinic_id=clinic.id,
+                        name=template_hsm_name,
+                        language=language,
+                    )
+                    if hsm_template is None and DEFAULT_SESSION_FALLBACK_HSM:
+                        hsm_template = _select_hsm_template(
+                            clinic_id=clinic.id,
+                            name=DEFAULT_SESSION_FALLBACK_HSM,
+                            language=language,
+                        )
+                    if hsm_template is None:
+                        return error_response("NO_HSM_AVAILABLE", status_code=400)
+                    outbound_body = _render_template_body(hsm_template.body, variables)
+                    hsm_name_to_use = hsm_template.name
+
+                idempotency_key = _build_idempotency_key(
+                    conversation_id=conversation.id,
+                    template_key=template.code,
+                    variables=variables,
+                )
 
             try:
-                outbox = enqueue_whatsapp_message(
-                    clinic_id=clinic.id,
-                    conversation=conversation,
-                    language=language,
-                    message_body=rendered_body,
-                    hsm_name=hsm_name_to_use or DEFAULT_SESSION_FALLBACK_HSM,
-                    variables=variables,
-                    idempotency_key=idempotency_key,
-                )
-            except Exception:
+                if reply_mode == "direct" and not requires_hsm:
+                    outbox = enqueue_whatsapp_session_message(
+                        clinic_id=clinic.id,
+                        conversation=conversation,
+                        language=language,
+                        message_body=rendered_body,
+                        idempotency_key=idempotency_key,
+                    )
+                else:
+                    outbox = enqueue_whatsapp_message(
+                        clinic_id=clinic.id,
+                        conversation=conversation,
+                        language=language,
+                        message_body=rendered_body,
+                        hsm_name=hsm_name_to_use or DEFAULT_SESSION_FALLBACK_HSM,
+                        variables=variables,
+                        idempotency_key=idempotency_key,
+                    )
+            except Exception as exc:
+                logger.exception("Failed to enqueue WhatsApp reply", exc_info=True)
                 return error_response("OUTBOX_ERROR", status_code=500)
 
             if requires_hsm and (
@@ -289,38 +340,114 @@ class ClinicConversationDetailView(APIView):
             ):
                 return error_response("NO_HSM_AVAILABLE", status_code=400)
 
-            conversation_message = ConversationMessage.objects.create(
-                conversation=conversation,
-                direction=MessageDirection.OUTBOUND,
-                language=language,
-                body=outbound_body,
-                intent="template_reply",
-                metadata={
+            if reply_mode == "direct":
+                intent = "human_reply"
+                metadata = {
+                    "reply_mode": "direct",
+                    "original_message": direct_message,
+                    "outbox_id": outbox.id,
+                    "message_type": outbox.message_type,
+                }
+            else:
+                intent = "template_reply"
+                metadata = {
+                    "reply_mode": "template",
                     "template_key": template.code,
                     "variables": variables,
                     "outbox_id": outbox.id,
                     "message_type": outbox.message_type,
-                },
+                }
+
+            conversation_message = ConversationMessage.objects.create(
+                conversation=conversation,
+                direction=MessageDirection.OUTBOUND,
+                language=language,
+                body=direct_message if reply_mode == "direct" else outbound_body,
+                intent=intent,
+                metadata=metadata,
             )
 
-            if (
-                not conversation.handoff_required
-                and (conversation.fsm_state or "").lower() == "done"
-            ):
+            update_fields = ["updated_at"]
+            if conversation.handoff_required:
+                conversation.handoff_required = False
+                update_fields.append("handoff_required")
+            if (conversation.fsm_state or "").lower() == "done":
                 conversation.fsm_state = "idle"
-                conversation.save(update_fields=["fsm_state", "updated_at"])
+                update_fields.append("fsm_state")
+            conversation.save(update_fields=update_fields)
+
+            if "handoff_required" in update_fields:
+                Notification.objects.filter(
+                    conversation=conversation, status=NotificationStatus.NEW
+                ).update(status=NotificationStatus.READ, updated_at=timezone.now())
+
+            # Prepare audit log metadata
+            audit_meta = {
+                "conversation_id": conversation.id,
+                "reply_mode": reply_mode,
+            }
+            if reply_mode == "direct":
+                audit_meta["message_preview"] = direct_message[:50]  # First 50 chars
             else:
-                conversation.save(update_fields=["updated_at"])
+                audit_meta["template_key"] = template.code if template else None
 
             AuditLog.objects.create(
                 actor_user=request.user if getattr(request, "user", None) else None,
                 action="CONVERSATION_REPLY",
                 scope=AuditLog.Scope.CLINIC,
                 clinic=clinic,
-                meta={"conversation_id": conversation.id, "template_key": template.code},
+                meta=audit_meta,
             )
 
             return ok_response({"message_id": conversation_message.id})
+
+
+class ClinicConversationResolveHandoffView(APIView):
+    """Mark a conversation handoff as resolved by a human."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+        ]
+    )
+    def post(self, request, slug: str, pk: int):
+        clinic: Clinic = request.clinic
+        conversation = (
+            Conversation.objects.filter(clinic=clinic, pk=pk)
+            .select_related("patient")
+            .first()
+        )
+        if conversation is None:
+            return error_response("NOT_FOUND", status_code=404)
+
+        update_fields = ["updated_at"]
+        if conversation.handoff_required:
+            conversation.handoff_required = False
+            update_fields.append("handoff_required")
+        if (conversation.fsm_state or "").lower() == "done":
+            conversation.fsm_state = "idle"
+            update_fields.append("fsm_state")
+
+        conversation.save(update_fields=update_fields)
+
+        if "handoff_required" in update_fields:
+            Notification.objects.filter(
+                conversation=conversation, status=NotificationStatus.NEW
+            ).update(status=NotificationStatus.READ, updated_at=timezone.now())
+
+        AuditLog.objects.create(
+            actor_user=request.user if getattr(request, "user", None) else None,
+            action="CONVERSATION_HANDOFF_RESOLVED",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta={"conversation_id": conversation.id},
+        )
+
+        return ok_response({"handoff": False})
 
 
 class ClinicAppointmentListView(APIView):
@@ -2548,6 +2675,107 @@ class ClinicSettingsView(APIView):
             "address": clinic.address or "",
             "tz": clinic.tz or "UTC",
             "default_lang": clinic.default_lang or "en",
+            "ai_enabled": clinic.ai_enabled,
+            "email": user_email or "",
+        }
+        return ok_response(data)
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+        ]
+    )
+    def put(self, request, slug: str):
+        clinic: Clinic = request.clinic
+        payload = request.data or {}
+
+        name = payload.get("name", "").strip()
+        phone_number = payload.get("phone_number", "").strip()
+        whatsapp_number = payload.get("whatsapp_number", "").strip()
+        address = payload.get("address", "").strip()
+        tz = payload.get("tz", "").strip()
+        default_lang = payload.get("default_lang", "").strip()
+        email = str(payload.get("email", "")).strip().lower()
+        ai_enabled_raw = payload.get("ai_enabled")
+
+        if not name:
+            return error_response("INVALID_NAME", status_code=400)
+
+        valid_langs = {choice for choice, _label in LanguageChoices.choices}
+        if default_lang and default_lang not in valid_langs:
+            return error_response("INVALID_LANGUAGE", status_code=400)
+
+        # Update user email if provided
+        if email:
+            try:
+                validate_email(email)
+            except ValidationError:
+                return error_response("INVALID_EMAIL", status_code=400)
+
+            existing_user = User.objects.filter(email__iexact=email).exclude(id=request.user.id).first()
+            if existing_user:
+                return error_response("EMAIL_ALREADY_EXISTS", status_code=400)
+
+            if request.user.email.lower() != email:
+                old_email = request.user.email
+                request.user.email = email
+                request.user.username = email
+                request.user.save(update_fields=["email", "username", "updated_at"])
+
+                AuditLog.objects.create(
+                    actor_user=request.user,
+                    action="USER_EMAIL_UPDATE",
+                    scope=AuditLog.Scope.CLINIC,
+                    clinic=clinic,
+                    meta={
+                        "old_email": old_email,
+                        "new_email": email,
+                    },
+                )
+
+        update_fields: list[str] = []
+        if clinic.name != name:
+            clinic.name = name
+            update_fields.append("name")
+        if phone_number is not None and clinic.phone_number != phone_number:
+            clinic.phone_number = phone_number
+            update_fields.append("phone_number")
+        if whatsapp_number is not None and clinic.whatsapp_number != whatsapp_number:
+            clinic.whatsapp_number = whatsapp_number
+            update_fields.append("whatsapp_number")
+        if address is not None and clinic.address != address:
+            clinic.address = address
+            update_fields.append("address")
+        if tz and clinic.tz != tz:
+            clinic.tz = tz
+            update_fields.append("tz")
+        if default_lang and clinic.default_lang != default_lang:
+            clinic.default_lang = default_lang
+            update_fields.append("default_lang")
+
+        if ai_enabled_raw is not None:
+            ai_enabled_value = bool(ai_enabled_raw)
+            if clinic.ai_enabled != ai_enabled_value:
+                clinic.ai_enabled = ai_enabled_value
+                update_fields.append("ai_enabled")
+
+        if update_fields:
+            update_fields.append("updated_at")
+            clinic.save(update_fields=update_fields)
+
+        membership = request.clinic_membership
+        user_email = membership.user.email if membership else request.user.email
+
+        data = {
+            "name": clinic.name,
+            "slug": clinic.slug,
+            "phone_number": clinic.phone_number or "",
+            "whatsapp_number": clinic.whatsapp_number or "",
+            "address": clinic.address or "",
+            "tz": clinic.tz or "UTC",
+            "default_lang": clinic.default_lang or "en",
+            "ai_enabled": clinic.ai_enabled,
             "email": user_email or "",
         }
         return ok_response(data)
@@ -2613,104 +2841,6 @@ class ClinicNotificationMarkReadView(APIView):
             notification.status = NotificationStatus.READ
             notification.save(update_fields=["status", "updated_at"])
         return ok_response({"id": notification.id, "status": notification.status})
-
-    @require_clinic_role(
-        allowed=[
-            ClinicMembership.Role.OWNER,
-            ClinicMembership.Role.ADMIN,
-        ]
-    )
-    def put(self, request, slug: str):
-        clinic: Clinic = request.clinic
-        payload = request.data or {}
-
-        name = payload.get("name", "").strip()
-        phone_number = payload.get("phone_number", "").strip()
-        whatsapp_number = payload.get("whatsapp_number", "").strip()
-        address = payload.get("address", "").strip()
-        tz = payload.get("tz", "").strip()
-        default_lang = payload.get("default_lang", "").strip()
-        email = payload.get("email", "").strip().lower()
-
-        if not name:
-            return error_response("INVALID_NAME", status_code=400)
-
-        valid_langs = {choice for choice, _label in LanguageChoices.choices}
-        if default_lang and default_lang not in valid_langs:
-            return error_response("INVALID_LANGUAGE", status_code=400)
-
-        # Update user email if provided
-        user_updated = False
-        if email:
-            try:
-                validate_email(email)
-            except ValidationError:
-                return error_response("INVALID_EMAIL", status_code=400)
-            
-            # Check if email is already taken by another user
-            existing_user = User.objects.filter(email__iexact=email).exclude(id=request.user.id).first()
-            if existing_user:
-                return error_response("EMAIL_ALREADY_EXISTS", status_code=400)
-            
-            # Update current user's email
-            if request.user.email.lower() != email:
-                old_email = request.user.email
-                request.user.email = email
-                request.user.username = email  # Update username to match email
-                request.user.save(update_fields=["email", "username", "updated_at"])
-                user_updated = True
-                
-                # Log email change
-                AuditLog.objects.create(
-                    actor_user=request.user,
-                    action="USER_EMAIL_UPDATE",
-                    scope=AuditLog.Scope.CLINIC,
-                    clinic=clinic,
-                    meta={
-                        "old_email": old_email,
-                        "new_email": email,
-                    },
-                )
-
-        update_fields = []
-        if clinic.name != name:
-            clinic.name = name
-            update_fields.append("name")
-        if phone_number is not None and clinic.phone_number != phone_number:
-            clinic.phone_number = phone_number
-            update_fields.append("phone_number")
-        if whatsapp_number is not None and clinic.whatsapp_number != whatsapp_number:
-            clinic.whatsapp_number = whatsapp_number
-            update_fields.append("whatsapp_number")
-        if address is not None and clinic.address != address:
-            clinic.address = address
-            update_fields.append("address")
-        if tz and clinic.tz != tz:
-            clinic.tz = tz
-            update_fields.append("tz")
-        if default_lang and clinic.default_lang != default_lang:
-            clinic.default_lang = default_lang
-            update_fields.append("default_lang")
-
-        if update_fields:
-            update_fields.append("updated_at")
-            clinic.save(update_fields=update_fields)
-
-        # Get updated email
-        membership = request.clinic_membership
-        user_email = membership.user.email if membership else request.user.email
-
-        data = {
-            "name": clinic.name,
-            "slug": clinic.slug,
-            "phone_number": clinic.phone_number or "",
-            "whatsapp_number": clinic.whatsapp_number or "",
-            "address": clinic.address or "",
-            "tz": clinic.tz or "UTC",
-            "default_lang": clinic.default_lang or "en",
-            "email": user_email or "",
-        }
-        return ok_response(data)
 
 
 class ClinicPatientListView(APIView):
@@ -3037,3 +3167,4 @@ class ClinicPatientDetailView(APIView):
         )
         
         return ok_response({"message": "Patient deleted successfully"})
+logger = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
@@ -41,9 +41,11 @@ export default function ConversationDetailPage() {
   const slug = params.slug;
   const conversationId = params.id;
 
+  const [replyMode, setReplyMode] = useState<"template" | "direct">("direct");
   const [lang, setLang] = useState<string>("en");
   const [templateKey, setTemplateKey] = useState<string>("");
   const [variablesJSON, setVariablesJSON] = useState<string>("{}");
+  const [directMessage, setDirectMessage] = useState<string>("");
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replyMessage, setReplyMessage] = useState<string | null>(null);
@@ -117,7 +119,12 @@ export default function ConversationDetailPage() {
   });
 
   const replyMutation = useMutation({
-    mutationFn: async (input: { template_key: string; variables?: Record<string, string> }) => {
+    mutationFn: async (input: {
+      reply_mode: "direct" | "template";
+      direct_message?: string;
+      template_key?: string;
+      variables?: Record<string, string>;
+    }) => {
       const response = await fetch(`/api/proxy/clinic/${slug}/conversations/${conversationId}/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -133,6 +140,7 @@ export default function ConversationDetailPage() {
       setReplyMessage("Reply sent successfully.");
       setError(null);
       setPreview(null);
+      setDirectMessage("");
       conversationQuery.refetch();
     },
     onError: (err: Error) => {
@@ -194,7 +202,12 @@ export default function ConversationDetailPage() {
       setError(parseResult.error);
       return;
     }
-    previewMutation.mutate(parseResult.data);
+    if (replyMode === "direct") {
+      setPreview(parseResult.data.direct_message || "");
+      setError(null);
+    } else {
+      previewMutation.mutate(parseResult.data);
+    }
   }
 
   function handleReply() {
@@ -207,31 +220,57 @@ export default function ConversationDetailPage() {
   }
 
   function parseForm():
-    | { success: true; data: { template_key: string; variables?: Record<string, string> } }
+    | {
+        success: true;
+        data: {
+          reply_mode: "direct" | "template";
+          direct_message?: string;
+          template_key?: string;
+          variables?: Record<string, string>;
+        };
+      }
     | { success: false; error: string } {
     setError(null);
-    const formValues = {
-      template_key: templateKey,
-    };
-    const parsedTemplate = replySchema.safeParse(formValues);
-    if (!parsedTemplate.success) {
-      return { success: false, error: parsedTemplate.error.issues[0]?.message ?? "Invalid template key" };
-    }
-    let variables: Record<string, string> | undefined = undefined;
-    if (variablesJSON.trim()) {
-      try {
-        const parsed = JSON.parse(variablesJSON);
-        if (typeof parsed !== "object" || Array.isArray(parsed)) {
-          return { success: false, error: "Variables JSON must be an object." };
-        }
-        variables = Object.fromEntries(
-          Object.entries(parsed).map(([key, value]) => [key, value == null ? "" : String(value)])
-        );
-      } catch {
-        return { success: false, error: "Variables must be valid JSON." };
+
+    if (replyMode === "direct") {
+      if (!directMessage.trim()) {
+        return { success: false, error: "Please enter a message." };
       }
+      if (directMessage.length > 4096) {
+        return { success: false, error: "Message is too long. Maximum 4096 characters." };
+      }
+      return {
+        success: true,
+        data: {
+          reply_mode: "direct",
+          direct_message: directMessage.trim(),
+        },
+      };
+    } else {
+      const formValues = {
+        reply_mode: "template" as const,
+        template_key: templateKey,
+      };
+      const parsedTemplate = replySchema.safeParse(formValues);
+      if (!parsedTemplate.success) {
+        return { success: false, error: parsedTemplate.error.issues[0]?.message ?? "Invalid template key" };
+      }
+      let variables: Record<string, string> | undefined = undefined;
+      if (variablesJSON.trim()) {
+        try {
+          const parsed = JSON.parse(variablesJSON);
+          if (typeof parsed !== "object" || Array.isArray(parsed)) {
+            return { success: false, error: "Variables JSON must be an object." };
+          }
+          variables = Object.fromEntries(
+            Object.entries(parsed).map(([key, value]) => [key, value == null ? "" : String(value)])
+          );
+        } catch {
+          return { success: false, error: "Variables must be valid JSON." };
+        }
+      }
+      return { success: true, data: { ...formValues, variables } };
     }
-    return { success: true, data: { template_key: templateKey, variables } };
   }
 
   return (
@@ -241,7 +280,7 @@ export default function ConversationDetailPage() {
           <div>
             <h1 className="text-2xl font-semibold">Conversation #{conversation.id}</h1>
             <p className="text-sm text-muted-foreground">
-              Intent: {conversation.intent || "—"} · FSM state: {conversation.fsm_state || "—"} · Handoff:{" "}
+              Intent: {conversation.intent || "—"} · FSM state: {conversation.fsm_state || "idle"} · Handoff:{" "}
               {conversation.handoff ? "Yes" : "No"}
             </p>
           </div>
@@ -285,87 +324,180 @@ export default function ConversationDetailPage() {
               </div>
             </article>
           ))}
+
+          {!conversation.handoff && (
+            <div className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-medium text-blue-900">Quick Reply</h3>
+                  <p className="text-xs text-blue-700">Send a reply to this conversation</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    document.querySelector("aside")?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                >
+                  Send Reply
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
       <aside className="space-y-6">
-        <section className="rounded-lg border bg-white p-6 shadow-sm">
+        <section className="rounded-lg border bg-white p-6 shadow-sm" id="reply-section">
           <header className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Reply with template</h2>
-              <p className="text-sm text-muted-foreground">Preview before sending to ensure variables are correct.</p>
+              <h2 className="text-lg font-semibold text-blue-900">Send Reply to Patient</h2>
+              <p className="text-sm text-muted-foreground">Choose a template or type a message to reply.</p>
             </div>
           </header>
 
           <div className="mt-4 space-y-4">
             <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="template-lang">
-                Template language
-              </label>
-              <select
-                id="template-lang"
-                value={lang}
-                onChange={(event) => {
-                  setLang(event.target.value);
-                  setTemplateKey("");
-                  setVariablesJSON("{}");
-                  setPreview(null);
-                  setError(null);
-                  setReplyMessage(null);
-                }}
-                className="w-full rounded border px-3 py-2 text-sm"
-              >
-                <option value="en">English</option>
-                <option value="ar">Arabic</option>
-              </select>
+              <label className="text-sm font-medium">Reply Mode</label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReplyMode("direct");
+                    setPreview(null);
+                    setError(null);
+                    setReplyMessage(null);
+                  }}
+                  className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                    replyMode === "direct"
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  Direct Message
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReplyMode("template");
+                    setPreview(null);
+                    setError(null);
+                    setReplyMessage(null);
+                  }}
+                  className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                    replyMode === "template"
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  Use Template
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="template-key">
-                Template key
-              </label>
-              <select
-                id="template-key"
-                value={templateKey}
-                onChange={(event) => {
-                  setTemplateKey(event.target.value);
-                  const selected = templates.find((tpl) => tpl.key === event.target.value);
-                  if (selected?.variables?.length) {
-                    const defaults = selected.variables.reduce<Record<string, string>>((acc, current) => {
-                      acc[current] = "";
-                      return acc;
-                    }, {});
-                    setVariablesJSON(JSON.stringify(defaults, null, 2));
-                  } else {
+            {replyMode === "template" && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium" htmlFor="template-lang">
+                  Template language
+                </label>
+                <select
+                  id="template-lang"
+                  value={lang}
+                  onChange={(event) => {
+                    setLang(event.target.value);
+                    setTemplateKey("");
                     setVariablesJSON("{}");
-                  }
-                }}
-                className="w-full rounded border px-3 py-2 text-sm"
-              >
-                <option value="">Select template</option>
-                {templates.map((template) => (
-                  <option key={template.key} value={template.key}>
-                    {template.key} {template.hsm ? "(HSM)" : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
+                    setPreview(null);
+                    setError(null);
+                    setReplyMessage(null);
+                  }}
+                  className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="en">English</option>
+                  <option value="ar">Arabic</option>
+                </select>
+              </div>
+            )}
 
-            <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="variables-json">
-                Variables (JSON)
-              </label>
-              <textarea
-                id="variables-json"
-                rows={6}
-                value={variablesJSON}
-                onChange={(event) => setVariablesJSON(event.target.value)}
-                className="w-full rounded border px-3 py-2 text-sm font-mono"
-              />
-              <p className="text-xs text-muted-foreground">
-                Provide key/value pairs matching template placeholders. Leave empty objects for none.
-              </p>
-            </div>
+            {replyMode === "direct" ? (
+              <div className="space-y-1">
+                <label className="text-sm font-medium" htmlFor="direct-message">
+                  Direct Message
+                </label>
+                <textarea
+                  id="direct-message"
+                  rows={6}
+                  value={directMessage}
+                  onChange={(event) => setDirectMessage(event.target.value)}
+                  placeholder="Type your message here..."
+                  className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Write your message directly. Maximum 4096 characters.
+                  {directMessage.length > 0 && (
+                    <span className={directMessage.length > 4096 ? "text-red-600" : "text-gray-500"}>
+                      {" "}({directMessage.length}/4096)
+                    </span>
+                  )}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium" htmlFor="template-key">
+                    Template key
+                  </label>
+                  <select
+                    id="template-key"
+                    value={templateKey}
+                    onChange={(event) => {
+                      setTemplateKey(event.target.value);
+                      const selected = templates.find((tpl) => tpl.key === event.target.value);
+                      if (selected?.variables?.length) {
+                        const defaults = selected.variables.reduce<Record<string, string>>((acc, current) => {
+                          acc[current] = "";
+                          return acc;
+                        }, {});
+                        setVariablesJSON(JSON.stringify(defaults, null, 2));
+                      } else {
+                        setVariablesJSON("{}");
+                      }
+                    }}
+                    className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">
+                      {templates.length === 0 ? "No templates available" : "Select template"}
+                    </option>
+                    {templates.map((template) => (
+                      <option key={template.key} value={template.key}>
+                        {template.key} {template.hsm ? "(HSM)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {templates.length === 0 && (
+                    <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
+                      No reply templates available. Please add templates in the Templates section first.
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-sm font-medium" htmlFor="variables-json">
+                    Variables (JSON)
+                  </label>
+                  <textarea
+                    id="variables-json"
+                    rows={6}
+                    value={variablesJSON}
+                    onChange={(event) => setVariablesJSON(event.target.value)}
+                    className="w-full rounded border px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Provide key/value pairs matching template placeholders. Leave empty objects for none.
+                  </p>
+                </div>
+              </>
+            )}
 
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
             {replyMessage ? <p className="text-sm text-green-600">{replyMessage}</p> : null}
@@ -374,25 +506,27 @@ export default function ConversationDetailPage() {
               <button
                 type="button"
                 onClick={handlePreview}
-                className="rounded-md border px-4 py-2 text-sm"
-                disabled={previewMutation.isPending}
+                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                disabled={previewMutation.isPending || replyMutation.isPending}
               >
                 {previewMutation.isPending ? "Previewing..." : "Preview"}
               </button>
               <button
                 type="button"
                 onClick={handleReply}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                disabled={replyMutation.isPending}
+                className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+                disabled={replyMutation.isPending || previewMutation.isPending}
               >
-                {replyMutation.isPending ? "Sending..." : "Send reply"}
+                {replyMutation.isPending ? "Sending..." : `Send ${replyMode === "direct" ? "Message" : "Reply"}`}
               </button>
             </div>
 
             {preview ? (
               <div className="rounded-md border bg-slate-50 p-4 text-sm">
                 <div className="flex items-center justify-between">
-                  <span className="font-medium">Preview</span>
+                  <span className="font-medium">
+                    Preview {replyMode === "direct" ? "(Direct Message)" : "(Template)"}
+                  </span>
                   <button
                     type="button"
                     className="text-xs text-primary underline"
@@ -423,6 +557,10 @@ function humanizeError(code: string | undefined) {
       return "No approved HSM is available for this template. Please choose another template.";
     case "FORBIDDEN":
       return "You do not have permission to send replies.";
+    case "MESSAGE_REQUIRED":
+      return "Please enter a message to send.";
+    case "MESSAGE_TOO_LONG":
+      return "Message is too long. Please keep it under 4096 characters.";
     default:
       return code || "Something went wrong. Please try again.";
   }

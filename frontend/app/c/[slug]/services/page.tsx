@@ -149,8 +149,9 @@ export default function ServicesPage() {
     setExistingServiceCodes(codes);
     setOriginalServices(services);
     
-    // Start with one empty service if no services exist, otherwise show existing ones
+    // Show only one card initially: empty for new services, or first existing service for updates
     if (services.length === 0) {
+      // No services exist - show one empty service card
       setServiceRows([
         {
           code: "",
@@ -162,14 +163,27 @@ export default function ServicesPage() {
         },
       ]);
     } else {
-      setServiceRows(services);
+      // Services exist - show first service for potential updates
+      setServiceRows([services[0]]);
     }
     // Reset changes tracking
     setServiceChanges(new Map());
   }, [services]);
 
   useEffect(() => {
-    setHoursRows(hours);
+    // Show only one hour card initially: empty for new hours, or first existing hour for updates
+    if (hours.length === 0) {
+      setHoursRows([
+        {
+          service_code: serviceRows[0]?.code || "",
+          weekday: 0, // Monday
+          start_time: "09:00",
+          end_time: "17:00",
+        },
+      ]);
+    } else {
+      setHoursRows([hours[0]]);
+    }
     setOriginalHours(hours);
     // Create a set of unique keys for existing hours
     const keys = new Set(

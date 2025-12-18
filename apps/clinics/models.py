@@ -35,6 +35,7 @@ class Clinic(TimeStampedModel):
     whatsapp_number = models.CharField(max_length=32, blank=True)
     address = models.TextField(blank=True)
     default_lang = models.CharField(max_length=8, default="en")
+    ai_enabled = models.BooleanField(default=True)
 
     class Meta:
         ordering = ["name"]
