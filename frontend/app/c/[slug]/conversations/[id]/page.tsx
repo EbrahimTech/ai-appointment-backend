@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
@@ -55,6 +55,8 @@ export default function ConversationDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [replyMessage, setReplyMessage] = useState<string | null>(null);
   const [aiToggleMessage, setAiToggleMessage] = useState<string | null>(null);
+  const [aiToggleStatus, setAiToggleStatus] = useState<"success" | "error" | null>(null);
+  const directInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const conversationQuery = useQuery({
     queryKey: ["conversation-detail", slug, conversationId],
@@ -188,10 +190,12 @@ export default function ConversationDetailPage() {
     },
     onSuccess: () => {
       setAiToggleMessage("تم تحديث حالة الذكاء الاصطناعي لهذا العميل.");
+      setAiToggleStatus("success");
       conversationQuery.refetch();
     },
     onError: (err: Error) => {
       setAiToggleMessage(err.message || "حدث خطأ أثناء التحديث.");
+      setAiToggleStatus("error");
     },
   });
 
@@ -365,7 +369,11 @@ export default function ConversationDetailPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    document.querySelector("aside")?.scrollIntoView({ behavior: "smooth" });
+                    setReplyMode("direct");
+                    document.getElementById("reply-section")?.scrollIntoView({ behavior: "smooth" });
+                    setTimeout(() => {
+                      directInputRef.current?.focus();
+                    }, 250);
                   }}
                   className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
                 >
@@ -379,11 +387,31 @@ export default function ConversationDetailPage() {
 
       <aside className="space-y-6">
         {patient?.id ? (
-          <section className="rounded-lg border bg-white p-6 shadow-sm">
-            <header className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-blue-900">إعدادات العميل</h2>
-                <p className="text-sm text-muted-foreground">تفعيل/إيقاف الرد الآلي لهذا العميل فقط.</p>
+          <section className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-5 shadow-sm">
+            <header className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-xs uppercase tracking-wide text-slate-500">التحكم بالذكاء الاصطناعي</p>
+                <h2 className="text-lg font-semibold text-slate-900">{patient.full_name || "العميل"}</h2>
+                <p className="text-sm text-slate-600">
+                  أوقف/فعّل الرد الآلي لهذا العميل فقط دون التأثير على باقي العملاء.
+                </p>
+              </div>
+              <span
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${
+                  patient.ai_enabled ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                }`}
+              >
+                <span className={`h-2 w-2 rounded-full ${patient.ai_enabled ? "bg-emerald-500" : "bg-amber-500"}`} />
+                {patient.ai_enabled ? "مفعّل" : "متوقف"}
+              </span>
+            </header>
+
+            <div className="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium text-slate-900">تشغيل الرد الآلي لهذا العميل</p>
+                <p className="text-xs text-slate-500">
+                  عند الإيقاف، سيتم تحويل المحادثة إلى handoff حتى تعيده للتشغيل.
+                </p>
               </div>
               <label className="inline-flex items-center gap-2 cursor-pointer">
                 <input
@@ -395,13 +423,20 @@ export default function ConversationDetailPage() {
                   }
                   disabled={togglePatientAI.isPending}
                 />
-                <span className="text-sm font-medium text-gray-800">
-                  {patient.ai_enabled ? "الذكاء الاصطناعي مفعّل" : "الذكاء الاصطناعي متوقف"}
+                <span className="text-sm font-medium text-slate-800">
+                  {togglePatientAI.isPending ? "جارٍ الحفظ..." : patient.ai_enabled ? "تشغيل" : "إيقاف"}
                 </span>
               </label>
-            </header>
+            </div>
+
             {aiToggleMessage ? (
-              <p className="mt-2 text-sm text-gray-700">{aiToggleMessage}</p>
+              <p
+                className={`mt-3 text-sm ${
+                  aiToggleStatus === "error" ? "text-red-600" : "text-emerald-700"
+                }`}
+              >
+                {aiToggleMessage}
+              </p>
             ) : null}
           </section>
         ) : null}
@@ -486,6 +521,7 @@ export default function ConversationDetailPage() {
                   id="direct-message"
                   rows={6}
                   value={directMessage}
+                  ref={directInputRef}
                   onChange={(event) => setDirectMessage(event.target.value)}
                   placeholder="Type your message here..."
                   className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
