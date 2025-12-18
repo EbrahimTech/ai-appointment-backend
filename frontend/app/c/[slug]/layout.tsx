@@ -82,7 +82,7 @@ export default function ClinicLayout({ children }: { children: ReactNode }) {
       { href: `/c/${slug}/notifications`, label: "Notifications", icon: Bell, badge: unreadNotifications || undefined },
       { href: `/c/${slug}/appointments`, label: "Appointments", icon: Calendar },
       { href: `/c/${slug}/patients`, label: "Patients", icon: Users },
-      { href: `/c/${slug}/templates`, label: "Templates", icon: FileText },
+      // { href: `/c/${slug}/templates`, label: "Templates", icon: FileText },
       { href: `/c/${slug}/services`, label: "Services & Hours", icon: Briefcase },
       { href: `/c/${slug}/users`, label: "Team", icon: Users },
       { href: `/c/${slug}/integrations`, label: "Integrations", icon: Plug },
