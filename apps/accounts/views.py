@@ -784,6 +784,55 @@ class ClinicAppointmentCancelView(APIView):
         return ok_response(data)
 
 
+class ClinicAppointmentDeleteView(APIView):
+    """Delete an appointment and remove external calendar events."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+        ]
+    )
+    def delete(self, request, slug: str, appointment_id: int):
+        clinic: Clinic = request.clinic
+
+        with transaction.atomic():
+            appointment = (
+                Appointment.objects.select_for_update()
+                .filter(clinic=clinic, id=appointment_id)
+                .first()
+            )
+            if appointment is None:
+                return error_response("INVALID_SERVICE", status_code=404)
+
+            calendar_event = getattr(appointment, "calendar_event", None)
+            credential = _get_google_credential(clinic)
+
+            # Best-effort cancel external event
+            if calendar_event and credential:
+                try:
+                    GoogleCalendarService().cancel_event(calendar_event, credential)
+                except GoogleCalendarServiceError:
+                    pass
+                finally:
+                    calendar_event.delete()
+
+            appointment.delete()
+
+        AuditLog.objects.create(
+            actor_user=request.user if getattr(request, "user", None) else None,
+            action="APPOINTMENT_DELETE",
+            scope=AuditLog.Scope.CLINIC,
+            clinic=clinic,
+            meta={"appointment_id": appointment_id},
+        )
+
+        return ok_response({"deleted": True, "id": appointment_id})
+
+
 class ClinicServiceAdminView(APIView):
     """Clinic service catalog management."""
 

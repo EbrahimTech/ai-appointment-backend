@@ -166,15 +166,20 @@ class GoogleCalendarService:
         if appointment.patient and appointment.patient.email:
             attendees.append({"email": appointment.patient.email})
 
+        start_dt = appointment.start_at
+        end_dt = appointment.end_at
+        if not start_dt or not end_dt:
+            raise ValueError("Appointment slot is not set")
+
         return {
             "summary": appointment.service.name if appointment.service else "Dental appointment",
             "description": appointment.notes,
             "start": {
-                "dateTime": appointment.slot.lower.isoformat(),
+                "dateTime": start_dt.isoformat(),
                 "timeZone": appointment.clinic.tz,
             },
             "end": {
-                "dateTime": appointment.slot.upper.isoformat(),
+                "dateTime": end_dt.isoformat(),
                 "timeZone": appointment.clinic.tz,
             },
             "attendees": attendees,

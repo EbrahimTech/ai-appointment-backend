@@ -64,6 +64,10 @@ const cancelSchema = z.object({
   id: z.number().int().positive(),
 });
 
+const deleteSchema = z.object({
+  id: z.number().int().positive(),
+});
+
 export default function AppointmentsPage() {
   const params = useParams<{ slug: string }>();
   const slug = params.slug;
@@ -84,6 +88,7 @@ export default function AppointmentsPage() {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [showServiceDropdown, setShowServiceDropdown] = useState(false);
   const [cancelConfirmation, setCancelConfirmation] = useState<number | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<number | null>(null);
 
   const servicesQuery = useQuery({
     queryKey: ["services", slug],
@@ -189,6 +194,29 @@ export default function AppointmentsPage() {
       setFeedback("Appointment cancelled.");
       setError(null);
       setCancelConfirmation(null);
+    },
+    onError: (err: Error) => {
+      setError(humanizeError(err.message));
+      setFeedback(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (payload: z.infer<typeof deleteSchema>) => {
+      const response = await fetch(`/api/proxy/clinic/${slug}/appointments/${payload.id}`, {
+        method: "DELETE",
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "DELETE_FAILED");
+      }
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["appointments", slug] });
+      setFeedback("Appointment deleted.");
+      setError(null);
+      setDeleteConfirmation(null);
     },
     onError: (err: Error) => {
       setError(humanizeError(err.message));
@@ -307,6 +335,25 @@ export default function AppointmentsPage() {
 
   function closeCancelModal() {
     setCancelConfirmation(null);
+  }
+
+  function requestDelete(id: number) {
+    if (readOnly) {
+      setError("Cannot modify appointments while impersonating. End support session first.");
+      setFeedback(null);
+      return;
+    }
+    setDeleteConfirmation(id);
+  }
+
+  function confirmDelete() {
+    if (deleteConfirmation) {
+      deleteMutation.mutate({ id: deleteConfirmation });
+    }
+  }
+
+  function closeDeleteModal() {
+    setDeleteConfirmation(null);
   }
 
   if (appointmentsQuery.isPending) {
@@ -654,12 +701,13 @@ export default function AppointmentsPage() {
               <Header label="Status" />
               <Header label="Sync" />
               <Header label="External ID" />
+              <Header label="Actions" />
             </tr>
           </thead>
               <tbody className="bg-white divide-y divide-gray-200">
             {appointments.length === 0 ? (
               <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center">
+                    <td colSpan={9} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center">
                         <Calendar className="w-12 h-12 text-gray-400 mb-3" />
                         <p className="text-sm font-medium text-gray-900 mb-1">No appointments found</p>
@@ -699,6 +747,19 @@ export default function AppointmentsPage() {
                     <SyncBadge state={appointment.sync_state} />
                   </Cell>
                       <Cell className="font-mono text-xs">{appointment.external_event_id ?? "—"}</Cell>
+                      <Cell>
+                        <button
+                          type="button"
+                          onClick={() => requestDelete(appointment.id)}
+                          disabled={deleteMutation.isPending || readOnly}
+                          className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                          <span>
+                            {deleteMutation.isPending && deleteConfirmation === appointment.id ? "Deleting..." : "Delete"}
+                          </span>
+                        </button>
+                      </Cell>
                 </tr>
               ))
             )}
@@ -758,6 +819,62 @@ export default function AppointmentsPage() {
                     <>
                       <XCircle className="w-4 h-4" />
                       Cancel Appointment
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {deleteConfirmation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+              <div className="bg-gradient-to-r from-red-600 to-rose-600 px-6 py-4 flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
+                  <AlertTriangle className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-white">Delete appointment</h2>
+                  <p className="text-sm text-red-100">This will remove the record permanently.</p>
+                </div>
+              </div>
+
+              <div className="p-6">
+                <p className="text-gray-700 text-base leading-relaxed">
+                  Are you sure you want to delete appointment{" "}
+                  <span className="font-semibold text-gray-900">#{deleteConfirmation}</span>?
+                </p>
+                <p className="text-sm text-gray-500 mt-2">
+                  The appointment will be deleted and any linked calendar event will be removed if present.
+                </p>
+              </div>
+
+              <div className="bg-gray-50 px-6 py-4 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeDeleteModal}
+                  className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors"
+                  disabled={deleteMutation.isPending}
+                >
+                  Keep appointment
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  className="px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 transition-all shadow-lg disabled:opacity-50 inline-flex items-center gap-2"
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <X className="w-4 h-4" />
+                      Delete
                     </>
                   )}
                 </button>

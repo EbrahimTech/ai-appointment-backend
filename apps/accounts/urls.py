@@ -4,6 +4,7 @@ from apps.accounts.api import AcceptInviteView, LoginView, MeView
 from apps.accounts.views import (
     ClinicAppointmentCancelView,
     ClinicAppointmentCreateView,
+    ClinicAppointmentDeleteView,
     ClinicAppointmentListView,
     ClinicAppointmentRescheduleView,
     ClinicConversationDetailView,
@@ -74,6 +75,11 @@ urlpatterns = [
         "clinic/<slug:slug>/appointments/cancel",
         ClinicAppointmentCancelView.as_view(),
         name="clinic-appointments-cancel",
+    ),
+    path(
+        "clinic/<slug:slug>/appointments/<int:appointment_id>",
+        ClinicAppointmentDeleteView.as_view(),
+        name="clinic-appointments-delete",
     ),
     path("clinic/<slug:slug>/patients", ClinicPatientListView.as_view(), name="clinic-patients"),
     path(
