@@ -11,6 +11,7 @@ import requests
 from django.conf import settings
 from django.urls import reverse
 from django.utils import timezone
+from zoneinfo import ZoneInfo
 
 from apps.appointments.models import Appointment
 from apps.calendars.models import CalendarEvent, GoogleCredential
@@ -171,15 +172,19 @@ class GoogleCalendarService:
         if not start_dt or not end_dt:
             raise ValueError("Appointment slot is not set")
 
+        tzinfo = ZoneInfo(appointment.clinic.tz or "UTC")
+        start_local = timezone.localtime(start_dt, tzinfo)
+        end_local = timezone.localtime(end_dt, tzinfo)
+
         return {
             "summary": appointment.service.name if appointment.service else "Dental appointment",
             "description": appointment.notes,
             "start": {
-                "dateTime": start_dt.isoformat(),
+                "dateTime": start_local.isoformat(),
                 "timeZone": appointment.clinic.tz,
             },
             "end": {
-                "dateTime": end_dt.isoformat(),
+                "dateTime": end_local.isoformat(),
                 "timeZone": appointment.clinic.tz,
             },
             "attendees": attendees,
