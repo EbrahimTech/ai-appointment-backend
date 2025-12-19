@@ -8,8 +8,8 @@ import json
 import math
 import re
 import secrets
-from datetime import datetime, timedelta, timezone as dt_timezone
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timedelta, time, timezone as dt_timezone
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -47,6 +47,7 @@ from apps.channels.models import (
 )
 from apps.calendars.models import CalendarEvent, GoogleCredential
 from apps.calendars.services import GoogleCalendarService, GoogleCalendarServiceError
+from apps.appointments.scheduling import _fetch_busy_windows, _is_available
 from apps.clinics.models import Clinic, ClinicService, ServiceHours, LanguageChoices
 from apps.common.api import error_response, ok_response
 from apps.conversations.models import Conversation, ConversationMessage, MessageDirection
@@ -78,6 +79,78 @@ class ClinicDashboardView(APIView):
         clinic: Clinic = request.clinic
         data = _clinic_dashboard_payload(clinic)
         return ok_response(data)
+
+
+class ClinicAvailableSlotsView(APIView):
+    """LLM tool endpoint to fetch available slots for a service."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_clinic_role(
+        allowed=[
+            ClinicMembership.Role.OWNER,
+            ClinicMembership.Role.ADMIN,
+            ClinicMembership.Role.STAFF,
+            ClinicMembership.Role.VIEWER,
+        ]
+    )
+    def post(self, request, slug: str):
+        clinic: Clinic = request.clinic
+        payload = request.data or {}
+        service_code = str(payload.get("service_code", "")).strip()
+        if not service_code:
+            return error_response("INVALID_SERVICE", status_code=400)
+
+        service = _get_service_by_code(clinic, service_code)
+        if service is None:
+            return error_response("INVALID_SERVICE", status_code=400)
+
+        limit_raw = payload.get("limit", 5)
+        try:
+            limit = max(1, min(10, int(limit_raw)))
+        except (TypeError, ValueError):
+            limit = 5
+
+        start_iso = payload.get("from_iso")
+        end_iso = payload.get("to_iso")
+
+        tzinfo = ZoneInfo(clinic.tz or "UTC")
+        start_local = _parse_clinic_datetime(start_iso, clinic) if start_iso else timezone.now().astimezone(tzinfo)
+        end_local = _parse_clinic_datetime(end_iso, clinic) if end_iso else start_local + timedelta(days=7)
+        if end_local <= start_local:
+            return error_response("INVALID_RANGE", status_code=400)
+
+        busy_windows, calendar_failed = _fetch_busy_windows(clinic, start_local, end_local)
+        duration = timedelta(minutes=service.duration_minutes)
+
+        slots: list[dict[str, Any]] = []
+        cursor = start_local
+        while cursor < end_local and len(slots) < limit:
+            target_date = cursor.date()
+            day_hours = service.hours.filter(weekday=target_date.weekday()).order_by("start_time")
+            for hours in day_hours:
+                start_dt = datetime.combine(target_date, hours.start_time, tzinfo=tzinfo)
+                end_window = datetime.combine(target_date, hours.end_time, tzinfo=tzinfo)
+                slot_start = max(start_dt, cursor)
+                while slot_start + duration <= end_window and slot_start < end_local:
+                    if _is_available(clinic, service, slot_start, duration, busy_windows):
+                        slots.append(
+                            {
+                                "start_at": slot_start.isoformat(),
+                                "end_at": (slot_start + duration).isoformat(),
+                                "tz": clinic.tz or "UTC",
+                                "tentative": calendar_failed,
+                                "source": "google" if not calendar_failed else "local",
+                            }
+                        )
+                        if len(slots) >= limit:
+                            break
+                    slot_start += duration
+                if len(slots) >= limit:
+                    break
+            cursor = datetime.combine(target_date, time.min, tzinfo=tzinfo) + timedelta(days=1)
+
+        return ok_response(slots=slots)
 
 
 class ClinicConversationListView(APIView):

@@ -7,6 +7,7 @@ from apps.accounts.views import (
     ClinicAppointmentDeleteView,
     ClinicAppointmentListView,
     ClinicAppointmentRescheduleView,
+    ClinicAvailableSlotsView,
     ClinicConversationDetailView,
     ClinicConversationListView,
     ClinicConversationResolveHandoffView,
@@ -80,6 +81,11 @@ urlpatterns = [
         "clinic/<slug:slug>/appointments/<int:appointment_id>",
         ClinicAppointmentDeleteView.as_view(),
         name="clinic-appointments-delete",
+    ),
+    path(
+        "clinic/<slug:slug>/tools/available-slots",
+        ClinicAvailableSlotsView.as_view(),
+        name="clinic-available-slots",
     ),
     path("clinic/<slug:slug>/patients", ClinicPatientListView.as_view(), name="clinic-patients"),
     path(
