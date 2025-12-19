@@ -28,20 +28,40 @@ def suggest_slots(clinic, *, service: ClinicService | None = None, count: int = 
     tz = ZoneInfo(clinic.tz or "UTC")
     now = timezone.now().astimezone(tz)
     search_end = now + timedelta(days=7)
+    return find_available_slots(clinic, service, start=now, end=search_end, limit=count)
 
-    busy_windows, calendar_failed = _fetch_busy_windows(clinic, now, search_end)
+
+def find_available_slots(
+    clinic,
+    service: ClinicService,
+    *,
+    start: datetime,
+    end: datetime,
+    limit: int = 5,
+) -> List[SuggestedSlot]:
+    """Return the next available slots for a service within a range."""
+    if limit <= 0:
+        return []
+
+    tz = ZoneInfo(clinic.tz or "UTC")
+    start_local = start.astimezone(tz) if start.tzinfo else start.replace(tzinfo=tz)
+    end_local = end.astimezone(tz) if end.tzinfo else end.replace(tzinfo=tz)
+    if end_local <= start_local:
+        return []
+
+    busy_windows, calendar_failed = _fetch_busy_windows(clinic, start_local, end_local)
+    duration = timedelta(minutes=service.duration_minutes)
 
     suggestions: list[SuggestedSlot] = []
-    for day_offset in range(0, 7):
-        target_date = (now + timedelta(days=day_offset)).date()
-        weekday = target_date.weekday()
-        day_hours = service.hours.filter(weekday=weekday).order_by("start_time")
+    cursor = start_local
+    while cursor < end_local and len(suggestions) < limit:
+        target_date = cursor.date()
+        day_hours = service.hours.filter(weekday=target_date.weekday()).order_by("start_time")
         for hours in day_hours:
             start_dt = datetime.combine(target_date, hours.start_time, tzinfo=tz)
             end_window = datetime.combine(target_date, hours.end_time, tzinfo=tz)
-            duration = timedelta(minutes=service.duration_minutes)
-            slot_start = max(start_dt, now)
-            while slot_start + duration <= end_window:
+            slot_start = max(start_dt, cursor)
+            while slot_start + duration <= end_window and slot_start < end_local:
                 if _is_available(clinic, service, slot_start, duration, busy_windows):
                     suggestions.append(
                         SuggestedSlot(
@@ -51,9 +71,10 @@ def suggest_slots(clinic, *, service: ClinicService | None = None, count: int = 
                             source="google" if not calendar_failed else "local",
                         )
                     )
-                    if len(suggestions) >= count:
+                    if len(suggestions) >= limit:
                         return suggestions
                 slot_start += duration
+        cursor = datetime.combine(target_date, time.min, tzinfo=tz) + timedelta(days=1)
     return suggestions
 
 

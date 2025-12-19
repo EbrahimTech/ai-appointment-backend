@@ -8,7 +8,7 @@ import json
 import math
 import re
 import secrets
-from datetime import datetime, timedelta, time, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -47,7 +47,7 @@ from apps.channels.models import (
 )
 from apps.calendars.models import CalendarEvent, GoogleCredential
 from apps.calendars.services import GoogleCalendarService, GoogleCalendarServiceError
-from apps.appointments.scheduling import _fetch_busy_windows, _is_available
+from apps.appointments.scheduling import find_available_slots
 from apps.clinics.models import Clinic, ClinicService, ServiceHours, LanguageChoices
 from apps.common.api import error_response, ok_response
 from apps.conversations.models import Conversation, ConversationMessage, MessageDirection
@@ -120,35 +120,24 @@ class ClinicAvailableSlotsView(APIView):
         if end_local <= start_local:
             return error_response("INVALID_RANGE", status_code=400)
 
-        busy_windows, calendar_failed = _fetch_busy_windows(clinic, start_local, end_local)
-        duration = timedelta(minutes=service.duration_minutes)
+        available = find_available_slots(
+            clinic,
+            service,
+            start=start_local,
+            end=end_local,
+            limit=limit,
+        )
 
-        slots: list[dict[str, Any]] = []
-        cursor = start_local
-        while cursor < end_local and len(slots) < limit:
-            target_date = cursor.date()
-            day_hours = service.hours.filter(weekday=target_date.weekday()).order_by("start_time")
-            for hours in day_hours:
-                start_dt = datetime.combine(target_date, hours.start_time, tzinfo=tzinfo)
-                end_window = datetime.combine(target_date, hours.end_time, tzinfo=tzinfo)
-                slot_start = max(start_dt, cursor)
-                while slot_start + duration <= end_window and slot_start < end_local:
-                    if _is_available(clinic, service, slot_start, duration, busy_windows):
-                        slots.append(
-                            {
-                                "start_at": slot_start.isoformat(),
-                                "end_at": (slot_start + duration).isoformat(),
-                                "tz": clinic.tz or "UTC",
-                                "tentative": calendar_failed,
-                                "source": "google" if not calendar_failed else "local",
-                            }
-                        )
-                        if len(slots) >= limit:
-                            break
-                    slot_start += duration
-                if len(slots) >= limit:
-                    break
-            cursor = datetime.combine(target_date, time.min, tzinfo=tzinfo) + timedelta(days=1)
+        slots = [
+            {
+                "start_at": slot.start.isoformat(),
+                "end_at": slot.end.isoformat(),
+                "tz": clinic.tz or "UTC",
+                "tentative": slot.tentative,
+                "source": slot.source,
+            }
+            for slot in available
+        ]
 
         return ok_response(slots=slots)
 

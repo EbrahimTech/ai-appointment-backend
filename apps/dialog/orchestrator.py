@@ -192,23 +192,54 @@ class DialogOrchestrator:
 
         if intent == "book":
             self.fsm.apply(conversation, "qualified", context={"message": body, "is_off_topic": False})
-            slots = suggest_slots(conversation.clinic)
-            if slots:
-                prompt = self._build_slot_prompt(slots, language, conversation.clinic.tz)
-                session_state.context["slot_suggestions"] = [
-                    {
-                        "start": slot.start.isoformat(),
-                        "end": slot.end.isoformat(),
-                        "tentative": slot.tentative,
-                        "source": slot.source,
-                    }
-                    for slot in slots
-                ]
-                session_state.context["slot_offer_prompt"] = prompt
-                session_state.save(update_fields=["context", "updated_at"])
-                response_text = prompt
+            slots: list[SuggestedSlot] | None
+            if getattr(settings, "LLM_TOOL_CALLING_ENABLED", False):
+                try:
+                    tool_reply, tool_slots = self.llm_router.answer_with_tools(
+                        clinic=conversation.clinic,
+                        language=language,
+                        prompt=body,
+                        conversation_id=conversation.id,
+                    )
+                    if tool_reply:
+                        if tool_slots:
+                            session_state.context["slot_suggestions"] = [
+                                {
+                                    "start": slot.start.isoformat(),
+                                    "end": slot.end.isoformat(),
+                                    "tentative": slot.tentative,
+                                    "source": slot.source,
+                                }
+                                for slot in tool_slots
+                            ]
+                            session_state.context["slot_offer_prompt"] = tool_reply
+                            session_state.save(update_fields=["context", "updated_at"])
+                        response_text = tool_reply
+                        slots = None
+                    else:
+                        slots = suggest_slots(conversation.clinic)
+                except LLMRouterError as exc:
+                    logger.warning("LLM tool call skipped: %s", exc)
+                    slots = suggest_slots(conversation.clinic)
             else:
-                response_text = AR_NO_AVAILABILITY if language == "ar" else "I'll review the calendar and follow up with options."
+                slots = suggest_slots(conversation.clinic)
+            if slots is not None:
+                if slots:
+                    prompt = self._build_slot_prompt(slots, language, conversation.clinic.tz)
+                    session_state.context["slot_suggestions"] = [
+                        {
+                            "start": slot.start.isoformat(),
+                            "end": slot.end.isoformat(),
+                            "tentative": slot.tentative,
+                            "source": slot.source,
+                        }
+                        for slot in slots
+                    ]
+                    session_state.context["slot_offer_prompt"] = prompt
+                    session_state.save(update_fields=["context", "updated_at"])
+                    response_text = prompt
+                else:
+                    response_text = AR_NO_AVAILABILITY if language == "ar" else "I'll review the calendar and follow up with options."
         elif intent in {"confirm", "cancel", "reschedule"}:
             self.fsm.apply(conversation, intent, context={"message": body, "is_off_topic": False})
             response_text = self._handle_terminal_intent(conversation, intent, language)

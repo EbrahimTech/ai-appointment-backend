@@ -16,7 +16,7 @@ from apps.clinics.models import Clinic, LanguageChoices
 from apps.conversations.models import Conversation, SessionState
 from apps.kb.models import KnowledgeChunk, KnowledgeIndex
 from apps.llm.models import LLMProvider, LLMRequestLog, RetrievalLog
-from apps.appointments.scheduling import suggest_slots
+from apps.appointments.scheduling import SuggestedSlot, find_available_slots, suggest_slots
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +182,48 @@ class LLMRouter:
 
         return content
 
+    def answer_with_tools(
+        self,
+        *,
+        clinic: Clinic,
+        language: str,
+        prompt: str,
+        conversation_id: int | None = None,
+    ) -> tuple[str | None, list[SuggestedSlot]]:
+        """Attempt a tool call for availability queries, else return a reply."""
+        if not self.api_key:
+            raise LLMRouterError("DeepSeek API key not configured.")
+
+        conversation: Conversation | None = None
+        session_state: SessionState | None = None
+        if conversation_id:
+            conversation = Conversation.objects.filter(pk=conversation_id).first()
+            if conversation:
+                session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
+
+        if not self._budget_available():
+            self._mark_economy_mode(session_state, conversation)
+            raise LLMRouterError("llm_budget_exhausted")
+
+        plan = self._plan_tool_call(clinic=clinic, language=language, prompt=prompt)
+        if not plan:
+            return None, []
+
+        if "reply" in plan:
+            return str(plan.get("reply") or ""), []
+
+        tool_name = plan.get("tool")
+        if tool_name != "get_available_slots":
+            return str(plan.get("reply") or ""), []
+
+        tool_result = self._tool_get_available_slots(clinic, plan.get("args") or {})
+        slots = tool_result.get("slots", [])
+        if not slots:
+            return self._finalize_tool_reply(language, prompt, []), []
+
+        reply = self._finalize_tool_reply(language, prompt, slots)
+        return reply, slots
+
     # ------------------------------------------------------------------ intent classification
     def classify_intent(
         self,
@@ -315,6 +357,157 @@ class LLMRouter:
             "- If off-topic, say so and steer back to dental appointments.\n"
             "- Do not provide medical advice or pricing not present in context."
         )
+
+    def _plan_tool_call(self, *, clinic: Clinic, language: str, prompt: str) -> dict | None:
+        services = list(clinic.services.filter(is_active=True).order_by("name")[:20])
+        service_list = "\n".join([f"- {svc.code}: {svc.name}" for svc in services]) or "No services"
+
+        system = (
+            "You are a dental clinic assistant. "
+            "Decide if you should call a tool to fetch appointment availability. "
+            "If the user asks about available times, return JSON with a tool call: "
+            '{"tool":"get_available_slots","args":{"service_code":"...", "from_iso":"", "to_iso":"", "limit":3}}. '
+            "Use a service_code from the list. "
+            "If you need clarification, return JSON with a reply: "
+            '{"reply":"..."} in the requested language. '
+            "Return only JSON, no extra text."
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": f"Services:\n{service_list}\n\nUser: {prompt}\nLanguage: {language}",
+            },
+        ]
+
+        content = self._send_llm_request(
+            messages=messages,
+            prompt=prompt,
+            model=getattr(settings, "LLM_TOOL_PLANNER_MODEL", self.model),
+            max_tokens=220,
+            temperature=0,
+        )
+        try:
+            return json.loads(content)
+        except Exception:
+            logger.warning("Tool planner parse failed: %s", content)
+            return None
+
+    def _tool_get_available_slots(self, clinic: Clinic, args: dict) -> dict:
+        service_code = str(args.get("service_code", "")).strip()
+        if not service_code:
+            return {"slots": []}
+
+        service = clinic.services.filter(code=service_code, is_active=True).first()
+        if not service:
+            return {"slots": []}
+
+        tzinfo = ZoneInfo(clinic.tz or "UTC")
+        start_local = self._parse_tool_datetime(args.get("from_iso"), tzinfo) or timezone.now().astimezone(tzinfo)
+        end_local = self._parse_tool_datetime(args.get("to_iso"), tzinfo) or (start_local + timedelta(days=7))
+
+        try:
+            limit = int(args.get("limit", 3))
+        except (TypeError, ValueError):
+            limit = 3
+        limit = max(1, min(5, limit))
+
+        slots = find_available_slots(
+            clinic,
+            service,
+            start=start_local,
+            end=end_local,
+            limit=limit,
+        )
+        return {"slots": slots, "tz": clinic.tz or "UTC"}
+
+    def _finalize_tool_reply(self, language: str, prompt: str, slots: list[SuggestedSlot]) -> str:
+        slot_lines = []
+        for slot in slots[:3]:
+            label = slot.start.strftime("%A %d %b %I:%M %p")
+            slot_lines.append(f"- {label}")
+        slot_text = "\n".join(slot_lines) if slot_lines else "No slots available."
+
+        system = (
+            "You are a dental clinic appointment assistant. "
+            "Use the provided slots if any. "
+            "Respond in the requested language. "
+            "Keep it concise and ask the user to pick a time."
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"User: {prompt}\nAvailable slots:\n{slot_text}"},
+        ]
+        return self._send_llm_request(
+            messages=messages,
+            prompt=prompt,
+            model=self.model,
+            max_tokens=240,
+            temperature=0.2,
+        )
+
+    def _parse_tool_datetime(self, raw: str | None, tzinfo: ZoneInfo) -> datetime | None:
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=tzinfo)
+        return dt.astimezone(tzinfo)
+
+    def _send_llm_request(
+        self,
+        *,
+        messages: list[dict],
+        prompt: str,
+        model: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> str:
+        start = timezone.now()
+        try:
+            response = requests.post(
+                f"{self.api_base}/v1/chat/completions",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=getattr(settings, "LLM_TIMEOUT_SECONDS", 15),
+            )
+        except requests.Timeout as exc:  # pragma: no cover - network path
+            raise LLMRouterError("llm_timeout") from exc
+
+        latency_ms = int((timezone.now() - start).total_seconds() * 1000)
+        if latency_ms > self.max_latency_ms:
+            raise LLMRouterError("llm_latency_exceeded")
+
+        if response.status_code >= 400:
+            logger.error("DeepSeek error %s: %s", response.status_code, response.text)
+            raise LLMRouterError("llm_provider_error")
+
+        payload = response.json()
+        content = payload["choices"][0]["message"]["content"].strip()
+
+        LLMRequestLog.objects.create(
+            provider=LLMProvider.DEEPSEEK,
+            model=model,
+            prompt=prompt,
+            response=content,
+            request_metadata={"messages": messages},
+            response_metadata=payload,
+            latency_ms=latency_ms,
+            success=True,
+            cost_estimate=self.cost_per_request,
+        )
+        return content
 
     def _build_context(self, chunks: List[KnowledgeChunk]) -> Tuple[str, List[KnowledgeChunk]]:
         char_budget = self.max_tokens * self.chars_per_token
