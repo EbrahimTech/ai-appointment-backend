@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
@@ -19,11 +19,6 @@ type ConversationDetail = {
   lang: string;
   fsm_state: string;
   handoff: boolean;
-  patient: {
-    id: number | null;
-    full_name: string;
-    ai_enabled: boolean;
-  } | null;
   messages: Message[];
 };
 
@@ -54,9 +49,6 @@ export default function ConversationDetailPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replyMessage, setReplyMessage] = useState<string | null>(null);
-  const [aiToggleMessage, setAiToggleMessage] = useState<string | null>(null);
-  const [aiToggleStatus, setAiToggleStatus] = useState<"success" | "error" | null>(null);
-  const directInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const conversationQuery = useQuery({
     queryKey: ["conversation-detail", slug, conversationId],
@@ -131,7 +123,7 @@ export default function ConversationDetailPage() {
       reply_mode: "direct" | "template";
       direct_message?: string;
       template_key?: string;
-      variables?: Record<string, string>;
+      variables?: Record<string, string>
     }) => {
       const response = await fetch(`/api/proxy/clinic/${slug}/conversations/${conversationId}/reply`, {
         method: "POST",
@@ -148,7 +140,6 @@ export default function ConversationDetailPage() {
       setReplyMessage("Reply sent successfully.");
       setError(null);
       setPreview(null);
-      setDirectMessage("");
       conversationQuery.refetch();
     },
     onError: (err: Error) => {
@@ -172,30 +163,6 @@ export default function ConversationDetailPage() {
     onSuccess: () => {
       conversationQuery.refetch();
       templatesQuery.refetch();
-    },
-  });
-
-  const togglePatientAI = useMutation({
-    mutationFn: async (input: { patient_id: number; ai_enabled: boolean }) => {
-      const response = await fetch(`/api/proxy/clinic/${slug}/patients/${input.patient_id}/ai`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ai_enabled: input.ai_enabled }),
-      });
-      const payload = await response.json();
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || "TOGGLE_FAILED");
-      }
-      return payload.data;
-    },
-    onSuccess: () => {
-      setAiToggleMessage("تم تحديث حالة الذكاء الاصطناعي لهذا العميل.");
-      setAiToggleStatus("success");
-      conversationQuery.refetch();
-    },
-    onError: (err: Error) => {
-      setAiToggleMessage(err.message || "حدث خطأ أثناء التحديث.");
-      setAiToggleStatus("error");
     },
   });
 
@@ -235,9 +202,11 @@ export default function ConversationDetailPage() {
       return;
     }
     if (replyMode === "direct") {
-      setPreview(parseResult.data.direct_message || "");
+      // For direct messages, show preview directly
+      setPreview(parseResult.data.direct_message);
       setError(null);
     } else {
+      // For templates, use API preview
       previewMutation.mutate(parseResult.data);
     }
   }
@@ -252,15 +221,12 @@ export default function ConversationDetailPage() {
   }
 
   function parseForm():
-    | {
-        success: true;
-        data: {
-          reply_mode: "direct" | "template";
-          direct_message?: string;
-          template_key?: string;
-          variables?: Record<string, string>;
-        };
-      }
+    | { success: true; data: {
+        reply_mode: "direct" | "template";
+        direct_message?: string;
+        template_key?: string;
+        variables?: Record<string, string>
+      } }
     | { success: false; error: string } {
     setError(null);
 
@@ -271,13 +237,10 @@ export default function ConversationDetailPage() {
       if (directMessage.length > 4096) {
         return { success: false, error: "Message is too long. Maximum 4096 characters." };
       }
-      return {
-        success: true,
-        data: {
-          reply_mode: "direct",
-          direct_message: directMessage.trim(),
-        },
-      };
+      return { success: true, data: {
+        reply_mode: "direct",
+        direct_message: directMessage.trim()
+      } };
     } else {
       const formValues = {
         reply_mode: "template" as const,
@@ -305,8 +268,6 @@ export default function ConversationDetailPage() {
     }
   }
 
-  const patient = conversation.patient;
-
   return (
     <main className="grid gap-8 px-6 py-8 lg:grid-cols-[2fr,1fr]">
       <section className="rounded-lg border bg-white p-6 shadow-sm">
@@ -314,7 +275,7 @@ export default function ConversationDetailPage() {
           <div>
             <h1 className="text-2xl font-semibold">Conversation #{conversation.id}</h1>
             <p className="text-sm text-muted-foreground">
-              Intent: {conversation.intent || "—"} · FSM state: {conversation.fsm_state || "idle"} · Handoff:{" "}
+              Intent: {conversation.intent || "—"} · FSM state: {conversation.fsm_state || "—"} · Handoff:{" "}
               {conversation.handoff ? "Yes" : "No"}
             </p>
           </div>
@@ -359,6 +320,7 @@ export default function ConversationDetailPage() {
             </article>
           ))}
 
+          {/* Quick Reply Button - Always visible */}
           {!conversation.handoff && (
             <div className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
               <div className="flex items-center justify-between">
@@ -369,11 +331,8 @@ export default function ConversationDetailPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setReplyMode("direct");
-                    document.getElementById("reply-section")?.scrollIntoView({ behavior: "smooth" });
-                    setTimeout(() => {
-                      directInputRef.current?.focus();
-                    }, 250);
+                    // Scroll to reply section
+                    document.querySelector('aside')?.scrollIntoView({ behavior: 'smooth' });
                   }}
                   className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
                 >
@@ -386,70 +345,16 @@ export default function ConversationDetailPage() {
       </section>
 
       <aside className="space-y-6">
-        {patient?.id ? (
-          <section className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-5 shadow-sm">
-            <header className="flex items-start justify-between gap-3">
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-slate-500">التحكم بالذكاء الاصطناعي</p>
-                <h2 className="text-lg font-semibold text-slate-900">{patient.full_name || "العميل"}</h2>
-                <p className="text-sm text-slate-600">
-                  أوقف/فعّل الرد الآلي لهذا العميل فقط دون التأثير على باقي العملاء.
-                </p>
-              </div>
-              <span
-                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${
-                  patient.ai_enabled ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-                }`}
-              >
-                <span className={`h-2 w-2 rounded-full ${patient.ai_enabled ? "bg-emerald-500" : "bg-amber-500"}`} />
-                {patient.ai_enabled ? "مفعّل" : "متوقف"}
-              </span>
-            </header>
-
-            <div className="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium text-slate-900">تشغيل الرد الآلي لهذا العميل</p>
-                <p className="text-xs text-slate-500">
-                  عند الإيقاف، سيتم تحويل المحادثة إلى handoff حتى تعيده للتشغيل.
-                </p>
-              </div>
-              <label className="inline-flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  checked={patient.ai_enabled}
-                  onChange={(e) =>
-                    togglePatientAI.mutate({ patient_id: patient.id!, ai_enabled: e.target.checked })
-                  }
-                  disabled={togglePatientAI.isPending}
-                />
-                <span className="text-sm font-medium text-slate-800">
-                  {togglePatientAI.isPending ? "جارٍ الحفظ..." : patient.ai_enabled ? "تشغيل" : "إيقاف"}
-                </span>
-              </label>
-            </div>
-
-            {aiToggleMessage ? (
-              <p
-                className={`mt-3 text-sm ${
-                  aiToggleStatus === "error" ? "text-red-600" : "text-emerald-700"
-                }`}
-              >
-                {aiToggleMessage}
-              </p>
-            ) : null}
-          </section>
-        ) : null}
-
         <section className="rounded-lg border bg-white p-6 shadow-sm" id="reply-section">
           <header className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-blue-900">Send Reply to Patient</h2>
-              <p className="text-sm text-muted-foreground">Choose a template or type a message to reply.</p>
+              <h2 className="text-lg font-semibold text-blue-900">📤 Send Reply to Clinic</h2>
+              <p className="text-sm text-muted-foreground">Choose a template and fill variables before sending.</p>
             </div>
           </header>
 
           <div className="mt-4 space-y-4">
+            {/* Reply Mode Selection */}
             <div className="space-y-1">
               <label className="text-sm font-medium">Reply Mode</label>
               <div className="flex gap-2">
@@ -467,7 +372,7 @@ export default function ConversationDetailPage() {
                       : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                   }`}
                 >
-                  Direct Message
+                  📝 Direct Message
                 </button>
                 <button
                   type="button"
@@ -483,7 +388,7 @@ export default function ConversationDetailPage() {
                       : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                   }`}
                 >
-                  Use Template
+                  📋 Use Template
                 </button>
               </div>
             </div>
@@ -513,6 +418,7 @@ export default function ConversationDetailPage() {
             )}
 
             {replyMode === "direct" ? (
+              /* Direct Message Mode */
               <div className="space-y-1">
                 <label className="text-sm font-medium" htmlFor="direct-message">
                   Direct Message
@@ -521,7 +427,6 @@ export default function ConversationDetailPage() {
                   id="direct-message"
                   rows={6}
                   value={directMessage}
-                  ref={directInputRef}
                   onChange={(event) => setDirectMessage(event.target.value)}
                   placeholder="Type your message here..."
                   className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -536,6 +441,7 @@ export default function ConversationDetailPage() {
                 </p>
               </div>
             ) : (
+              /* Template Mode */
               <>
                 <div className="space-y-1">
                   <label className="text-sm font-medium" htmlFor="template-key">
@@ -570,7 +476,7 @@ export default function ConversationDetailPage() {
                   </select>
                   {templates.length === 0 && (
                     <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
-                      No reply templates available. Please add templates in the Templates section first.
+                      ⚠️ No reply templates available. Please add templates in the Templates section first.
                     </p>
                   )}
                 </div>
@@ -611,7 +517,7 @@ export default function ConversationDetailPage() {
                 className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
                 disabled={replyMutation.isPending || previewMutation.isPending}
               >
-                {replyMutation.isPending ? "Sending..." : `Send ${replyMode === "direct" ? "Message" : "Reply"}`}
+                {replyMutation.isPending ? "Sending..." : `📤 Send ${replyMode === "direct" ? "Message" : "Reply"}`}
               </button>
             </div>
 
