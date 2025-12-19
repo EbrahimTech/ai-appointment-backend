@@ -4,7 +4,21 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupportSession } from "../../../providers";
-import { Settings, Save, AlertCircle, CheckCircle2, Globe, Phone, MapPin, Clock, Languages, Mail } from "lucide-react";
+import { Settings, Save, AlertCircle, CheckCircle2, Globe, Phone, MapPin, Clock, Languages, Mail, Compass } from "lucide-react";
+
+// Representative, non-duplicated timezones
+const TIMEZONES = [
+  "UTC",
+  "Europe/Istanbul",
+  "Asia/Riyadh",
+  "Asia/Dubai",
+  "Europe/London",
+  "Europe/Berlin",
+  "America/New_York",
+  "America/Los_Angeles",
+  "Asia/Karachi",
+  "Asia/Manila",
+];
 
 type ClinicInfo = {
   name: string;
@@ -25,6 +39,9 @@ export default function ClinicSettingsPage() {
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<Partial<ClinicInfo>>({});
+  const [localTimezone, setLocalTimezone] = useState<string>(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const [tzSelection, setTzSelection] = useState<string | undefined>(undefined);
+  const [autoTzApplied, setAutoTzApplied] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -104,6 +121,10 @@ export default function ClinicSettingsPage() {
 
   const handleChange = (field: keyof ClinicInfo, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+    if (field === "tz") {
+      setTzSelection(value);
+      setAutoTzApplied(false);
+    }
   };
 
   const handleToggle = (field: keyof ClinicInfo, value: boolean) => {
@@ -319,13 +340,56 @@ export default function ClinicSettingsPage() {
                     </div>
                   </label>
                   {isEditing ? (
-                    <input
-                      type="text"
-                      value={clinicData?.tz || ""}
-                      onChange={(e) => handleChange("tz", e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-colors"
-                      placeholder="UTC, America/New_York, etc."
-                    />
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleChange("tz", localTimezone);
+                            setIsEditing(true); // keep editing state
+                            setAutoTzApplied(true);
+                          }}
+                          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                            autoTzApplied
+                              ? "border-blue-300 bg-blue-50 text-blue-700"
+                              : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
+                        >
+                          <Compass className="w-4 h-4" />
+                          {autoTzApplied ? "Local timezone applied" : `Use my local timezone (${localTimezone})`}
+                        </button>
+                        {autoTzApplied && (
+                          <button
+                            type="button"
+                            onClick={() => setAutoTzApplied(false)}
+                            className="text-xs text-gray-600 underline hover:text-gray-800"
+                          >
+                            Switch to manual
+                          </button>
+                        )}
+                      </div>
+                      <select
+                        value={tzSelection ?? clinicData?.tz ?? "UTC"}
+                        onChange={(e) => handleChange("tz", e.target.value)}
+                        className={`w-full rounded-lg border px-4 py-2.5 text-sm outline-none transition-colors bg-white ${
+                          autoTzApplied ? "border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed" : "border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                        }`}
+                        disabled={autoTzApplied}
+                      >
+                        {TIMEZONES.map((tz) => (
+                          <option key={tz} value={tz}>
+                            {tz}
+                          </option>
+                        ))}
+                        {!TIMEZONES.includes(localTimezone) && (
+                          <option value={localTimezone}>{localTimezone} (detected)</option>
+                        )}
+                      </select>
+                      <p className="text-xs text-gray-500">
+                        Google Calendar typically uses the local timezone; choose auto-detect or set a specific timezone from the list.
+                        You can switch back to manual selection via "Switch to manual".
+                      </p>
+                    </div>
                   ) : (
                     <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900">
                       {clinicData?.tz || "UTC"}
