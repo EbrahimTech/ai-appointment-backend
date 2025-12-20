@@ -36,6 +36,17 @@ type TemplateItem = {
   enabled: boolean;
 };
 
+type DirectReplyPayload = {
+  reply_mode: "direct";
+  direct_message: string;
+};
+
+type TemplateReplyPayload = {
+  reply_mode: "template";
+  template_key: string;
+  variables?: Record<string, string>;
+};
+
 const replySchema = z.object({
   template_key: z.string().min(1),
   variables: z.record(z.string()).optional(),
@@ -66,7 +77,19 @@ export default function ConversationDetailPage() {
       }
       return payload.data as ConversationDetail;
     },
-    refetchInterval: 3000,
+    refetchInterval: (query) => {
+      const data = query.state.data as ConversationDetail | undefined;
+      const messages = data?.messages ?? [];
+      if (!messages.length) {
+        return false;
+      }
+      const lastTs = messages.reduce((latest, msg) => {
+        const current = new Date(msg.ts).getTime();
+        return current > latest ? current : latest;
+      }, 0);
+      const ageMs = Date.now() - lastTs;
+      return ageMs <= 60_000 ? 1000 : 3000;
+    },
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
@@ -246,13 +269,16 @@ export default function ConversationDetailPage() {
       setError(parseResult.error);
       return;
     }
-    if (replyMode === "direct") {
+    if (parseResult.data.reply_mode === "direct") {
       // For direct messages, show preview directly
       setPreview(parseResult.data.direct_message);
       setError(null);
     } else {
       // For templates, use API preview
-      previewMutation.mutate(parseResult.data);
+      previewMutation.mutate({
+        template_key: parseResult.data.template_key,
+        variables: parseResult.data.variables,
+      });
     }
   }
 
@@ -266,12 +292,7 @@ export default function ConversationDetailPage() {
   }
 
   function parseForm():
-    | { success: true; data: {
-        reply_mode: "direct" | "template";
-        direct_message?: string;
-        template_key?: string;
-        variables?: Record<string, string>
-      } }
+    | { success: true; data: DirectReplyPayload | TemplateReplyPayload }
     | { success: false; error: string } {
     setError(null);
 
