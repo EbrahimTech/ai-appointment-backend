@@ -66,6 +66,9 @@ export default function ConversationDetailPage() {
       }
       return payload.data as ConversationDetail;
     },
+    refetchInterval: 3000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
 
   const templatesQuery = useQuery({
