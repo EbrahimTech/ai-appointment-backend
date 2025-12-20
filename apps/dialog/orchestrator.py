@@ -47,7 +47,7 @@ class DialogOrchestrator:
         language: str,
     ) -> Tuple[str | None, str]:
         normalized = normalize_text(body)
-        intent = detect_intent(normalized)
+        intent = "greet" if self._is_greeting(normalized) else detect_intent(normalized)
         # LLM intent fallback (structured) to better understand Arabic/free-form requests
         if intent == "clarify" and getattr(settings, "LLM_INTENT_ENABLED", True):
             try:
@@ -120,7 +120,52 @@ class DialogOrchestrator:
                     notify_handoff(conversation)
                 except Exception as err:  # pragma: no cover - best effort logging
                     logger.warning("Failed to create handoff notification: %s", err)
-            return None, "handoff"
+                return None, "handoff"
+
+        if intent == "greet":
+            response_text = (
+                "أهلًا! كيف أقدر أساعدك بحجز موعد؟"
+                if language == "ar"
+                else "Hi! How can I help you book an appointment?"
+            )
+            ConversationMessage.objects.create(
+                conversation=conversation,
+                direction="outbound",
+                language=language,
+                body=response_text,
+                intent="greet",
+                metadata={"auto_reply": True},
+            )
+            enqueue_whatsapp_session_message(
+                clinic_id=conversation.clinic_id,
+                conversation=conversation,
+                language=language,
+                message_body=response_text,
+                idempotency_key=f"greet:{conversation.id}:{inbound_message.id}",
+            )
+            return response_text, "greet"
+
+        slot_suggestions = session_state.context.get("slot_suggestions") or []
+        preselected_slot = None
+        if intent == "clarify" and slot_suggestions:
+            preselected_slot = self._select_slot_from_reply(body, slot_suggestions, conversation.clinic.tz)
+            if not preselected_slot and getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
+                try:
+                    idx = self.llm_router.select_slot_from_reply(
+                        clinic=conversation.clinic,
+                        language=language,
+                        prompt=body,
+                        slots=slot_suggestions,
+                        conversation_id=conversation.id,
+                    )
+                    if idx and 1 <= idx <= len(slot_suggestions):
+                        preselected_slot = slot_suggestions[idx - 1]
+                except LLMRouterError as exc:
+                    logger.warning("LLM slot selection skipped: %s", exc)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error("LLM slot selection error: %s", exc, exc_info=True)
+            if preselected_slot:
+                intent = "confirm"
 
         # Track repeated unproductive intents to auto-handoff
         productive_intents = {"book", "confirm", "cancel", "reschedule"}
@@ -258,7 +303,7 @@ class DialogOrchestrator:
             if intent == "confirm" and getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
                 slot_suggestions = session_state.context.get("slot_suggestions") or []
                 service_code = session_state.context.get("slot_service_code")
-                selected = self._select_slot_from_reply(body, slot_suggestions, conversation.clinic.tz)
+                selected = preselected_slot or self._select_slot_from_reply(body, slot_suggestions, conversation.clinic.tz)
                 if not selected and slot_suggestions:
                     try:
                         idx = self.llm_router.select_slot_from_reply(
@@ -454,6 +499,7 @@ class DialogOrchestrator:
             "أي وقت",
             "اي وقت مناسب",
             "أي وقت مناسب",
+            "المناسب",
             "اي موعد",
             "أي موعد",
             "اول وقت",
