@@ -366,33 +366,38 @@ export default function ConversationDetailPage() {
           </div>
         ) : null}
 
-        {patient ? (
-          <div className="mt-4 rounded-md border bg-slate-50 px-4 py-3 text-sm">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="font-semibold text-gray-900">AI for {patient.full_name}</p>
-                <p className="text-xs text-gray-600">
-                  Disable to route this patient directly to human support.
+        <div className="mt-4 rounded-md border bg-slate-50 px-4 py-3 text-sm">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-gray-900">
+                AI for {patient?.full_name || "this patient"}
+              </p>
+              <p className="text-xs text-gray-600">
+                Disable to route this patient directly to human support.
+              </p>
+              {!patient?.id ? (
+                <p className="mt-1 text-xs text-amber-700">
+                  This conversation is not linked to a patient yet.
                 </p>
-              </div>
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  checked={!!patient.ai_enabled}
-                  onChange={(event) => patientAiToggle.mutate(event.target.checked)}
-                  disabled={patientAiToggle.isPending}
-                />
-                <span className="text-sm font-medium text-gray-800">
-                  {patient.ai_enabled ? "Enabled" : "Disabled"}
-                </span>
-              </label>
+              ) : null}
             </div>
-            {patientToggleError ? (
-              <p className="mt-2 text-xs text-red-600">{patientToggleError}</p>
-            ) : null}
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                checked={!!patient?.ai_enabled}
+                onChange={(event) => patientAiToggle.mutate(event.target.checked)}
+                disabled={!patient?.id || patientAiToggle.isPending}
+              />
+              <span className="text-sm font-medium text-gray-800">
+                {patient?.ai_enabled ? "Enabled" : "Disabled"}
+              </span>
+            </label>
           </div>
-        ) : null}
+          {patientToggleError ? (
+            <p className="mt-2 text-xs text-red-600">{patientToggleError}</p>
+          ) : null}
+        </div>
 
         <div className="mt-6 space-y-4">
           {orderedMessages.map((message) => (

@@ -235,6 +235,16 @@ class ClinicConversationDetailView(APIView):
         if conversation is None:
             return error_response("NOT_FOUND", status_code=404)
 
+        if conversation.patient is None and conversation.dedupe_key:
+            parts = conversation.dedupe_key.split(":", 1)
+            if len(parts) == 2 and parts[1]:
+                patient = Patient.objects.filter(
+                    clinic=clinic, normalized_phone=parts[1]
+                ).first()
+                if patient:
+                    conversation.patient = patient
+                    conversation.save(update_fields=["patient", "updated_at"])
+
         payload = {
             "id": conversation.id,
             "intent": conversation.last_intent or "",
