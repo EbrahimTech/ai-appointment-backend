@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from apps.appointments.scheduling import SuggestedSlot, suggest_slots
 from apps.accounts.views import book_appointment
-from apps.channels.services import enqueue_whatsapp_hsm, enqueue_whatsapp_session_message
+from apps.channels.services import enqueue_whatsapp_session_message
 from apps.conversations.models import Conversation, ConversationMessage, SessionState
 from apps.dialog.fsm import DialogFSM
 from apps.dialog.intent import detect_intent
@@ -350,6 +350,18 @@ class DialogOrchestrator:
                                 response_text = f"تم حجز موعدك في {time_label}.{suffix}"
                             else:
                                 response_text = f"Your appointment is booked for {time_label}.{suffix}"
+                            try:
+                                response_text = self.llm_router.compose_action_reply(
+                                    language=language,
+                                    action="confirm",
+                                    time_label=time_label,
+                                    clinic_name=conversation.clinic.name,
+                                    conversation_id=conversation.id,
+                                )
+                            except LLMRouterError as exc:
+                                logger.warning("LLM action reply skipped: %s", exc)
+                            except Exception as exc:  # pragma: no cover - defensive
+                                logger.error("LLM action reply error: %s", exc, exc_info=True)
                             queue_session = True
                         else:
                             error_text = "That slot is no longer available. Please choose another time."
@@ -359,7 +371,7 @@ class DialogOrchestrator:
                             queue_session = True
                     else:
                         response_text = self._handle_terminal_intent(conversation, intent, language)
-                        queue_session = False
+                        queue_session = True
                 elif slot_suggestions:
                     response_text = (
                         "Please choose one of the suggested times (e.g., 1 or 2)."
@@ -369,10 +381,10 @@ class DialogOrchestrator:
                     queue_session = True
                 else:
                     response_text = self._handle_terminal_intent(conversation, intent, language)
-                    queue_session = False
+                    queue_session = True
             else:
                 response_text = self._handle_terminal_intent(conversation, intent, language)
-                queue_session = False
+                queue_session = True
         else:
             try:
                 response_text = self.llm_router.answer(
@@ -385,19 +397,10 @@ class DialogOrchestrator:
                 error_code = str(exc)
                 logger.warning("LLM fallback (%s): %s", error_code, exc)
                 if error_code in {"llm_budget_exhausted", "rag_context_missing", "llm_timeout", "llm_latency_exceeded", "llm_provider_error"}:
-                    fallback_template = getattr(settings, "LLM_FALLBACK_TEMPLATE_NAME", "session_clarify")
-                    enqueue_whatsapp_hsm(
-                        clinic_id=conversation.clinic_id,
-                        conversation=conversation,
-                        template_name=fallback_template,
-                        language=language,
-                        variables={"name": conversation.patient.full_name if conversation.patient else AR_GUEST_FALLBACK},
-                        delay_seconds=2,
-                    )
                     response_text = (
                         AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
                     )
-                    queue_session = False
+                    queue_session = True
                 else:
                     response_text = (
                         AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
@@ -433,29 +436,25 @@ class DialogOrchestrator:
         return response_text, intent
 
     def _handle_terminal_intent(self, conversation: Conversation, intent: str, language: str) -> str:
+        action = intent
+        try:
+            return self.llm_router.compose_action_reply(
+                language=language,
+                action=action,
+                clinic_name=conversation.clinic.name,
+                conversation_id=conversation.id,
+            )
+        except LLMRouterError as exc:
+            logger.warning("LLM action reply skipped: %s", exc)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("LLM action reply error: %s", exc, exc_info=True)
+
         if intent == "confirm":
-            try:
-                enqueue_whatsapp_hsm(
-                    clinic_id=conversation.clinic_id,
-                    conversation=conversation,
-                    template_name="appointment_confirmed",
-                    language=language,
-                    variables={"name": conversation.patient.full_name if conversation.patient else AR_GUEST_FALLBACK},
-                    delay_seconds=2,
-                )
-            except Exception as exc:  # pragma: no cover - logging only
-                logger.warning("Failed to queue confirmation template: %s", exc)
-            return (
-                AR_CONFIRM_MESSAGE if language == "ar" else "Your appointment is confirmed. See you soon!"
-            )
+            return AR_CONFIRM_MESSAGE if language == "ar" else "Your appointment is confirmed. See you soon!"
         if intent == "cancel":
-            return (
-                AR_CANCEL_MESSAGE if language == "ar" else "Your appointment has been cancelled as requested."
-            )
+            return AR_CANCEL_MESSAGE if language == "ar" else "Your appointment has been cancelled as requested."
         if intent == "reschedule":
-            return (
-                AR_RESCHEDULE_MESSAGE if language == "ar" else "Let's pick a new slot for you."
-            )
+            return AR_RESCHEDULE_MESSAGE if language == "ar" else "Let's pick a new slot for you."
         return ""
 
     def _build_slot_prompt(self, slots: list[SuggestedSlot], language: str, clinic_timezone: str) -> str:
@@ -593,3 +592,25 @@ class DialogOrchestrator:
             if any(candidate and candidate in normalized for candidate in candidates):
                 return slot
         return None
+
+    def _is_greeting(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        greetings = {
+            "hi",
+            "hello",
+            "hey",
+            "good morning",
+            "good evening",
+            "good afternoon",
+            "مرحبا",
+            "اهلا",
+            "أهلا",
+            "هلا",
+            "السلام عليكم",
+            "السلام",
+            "سلام",
+            "صباح الخير",
+            "مساء الخير",
+        }
+        return any(greet in normalized for greet in greetings)
