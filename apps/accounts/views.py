@@ -9,6 +9,7 @@ import math
 import re
 import secrets
 from datetime import datetime, timedelta, timezone as dt_timezone
+from uuid import uuid4
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -331,11 +332,12 @@ class ClinicConversationDetailView(APIView):
                     outbound_body = _render_template_body(hsm_template.body, {"message": direct_message})
                     hsm_name_to_use = hsm_template.name
 
-                idempotency_key = _build_idempotency_key(
+                base_idempotency_key = _build_idempotency_key(
                     conversation_id=conversation.id,
                     template_key="direct_message",
                     variables={"message": direct_message[:100]},  # Limit for idempotency key
                 )
+                idempotency_key = f"{base_idempotency_key}-{uuid4()}"
             else:
                 # Template mode (existing logic)
                 template = (
