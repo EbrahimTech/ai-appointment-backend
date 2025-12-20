@@ -446,6 +446,89 @@ class LLMRouter:
 
         return f"{intro}\n" + "\n".join(lines) + f"\n{outro}"
 
+    def select_slot_from_reply(
+        self,
+        *,
+        clinic: Clinic,
+        language: str,
+        prompt: str,
+        slots: list[dict],
+        conversation_id: int | None = None,
+    ) -> int | None:
+        """Use the LLM to pick a slot index based on the user's reply."""
+        if not slots:
+            return None
+        if not self.api_key:
+            raise LLMRouterError("DeepSeek API key not configured.")
+
+        conversation: Conversation | None = None
+        session_state: SessionState | None = None
+        if conversation_id:
+            conversation = Conversation.objects.filter(pk=conversation_id).first()
+            if conversation:
+                session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
+
+        if not self._budget_available():
+            self._mark_economy_mode(session_state, conversation)
+            raise LLMRouterError("llm_budget_exhausted")
+
+        tz = ZoneInfo(clinic.tz or "UTC")
+        slot_lines: list[str] = []
+        for idx, slot in enumerate(slots, start=1):
+            start_raw = slot.get("start") or slot.get("start_at") or slot.get("start_at_iso") or ""
+            label = str(start_raw)
+            try:
+                parsed = datetime.fromisoformat(str(start_raw))
+            except (TypeError, ValueError):
+                parsed = None
+            if parsed:
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=tz)
+                label = parsed.astimezone(tz).strftime("%A %d %b %I:%M %p")
+            slot_lines.append(f"{idx}. {label}")
+
+        system = (
+            "You are a scheduling assistant. Choose which slot best matches the user's reply. "
+            "Return only JSON: {\"index\": 1} or {\"index\": null}. "
+            "If the user says any time / first available, choose 1. "
+            "If no slot matches, return null."
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": (
+                    f"Language: {language}\n"
+                    f"User reply: {prompt}\n"
+                    f"Slots:\n" + "\n".join(slot_lines)
+                ),
+            },
+        ]
+
+        content = self._send_llm_request(
+            messages=messages,
+            prompt=prompt,
+            model=self.model,
+            max_tokens=80,
+            temperature=0,
+        )
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            logger.warning("Slot selection parse failed: %s", content)
+            return None
+
+        idx = parsed.get("index")
+        if idx is None:
+            idx = parsed.get("slot_index")
+        try:
+            idx_value = int(idx)
+        except (TypeError, ValueError):
+            return None
+        if 1 <= idx_value <= len(slots):
+            return idx_value
+        return None
+
     def _parse_tool_datetime(self, raw: str | None, tzinfo: ZoneInfo) -> datetime | None:
         if not raw:
             return None

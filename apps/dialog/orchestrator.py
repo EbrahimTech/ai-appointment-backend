@@ -259,6 +259,21 @@ class DialogOrchestrator:
                 slot_suggestions = session_state.context.get("slot_suggestions") or []
                 service_code = session_state.context.get("slot_service_code")
                 selected = self._select_slot_from_reply(body, slot_suggestions, conversation.clinic.tz)
+                if not selected and slot_suggestions:
+                    try:
+                        idx = self.llm_router.select_slot_from_reply(
+                            clinic=conversation.clinic,
+                            language=language,
+                            prompt=body,
+                            slots=slot_suggestions,
+                            conversation_id=conversation.id,
+                        )
+                        if idx and 1 <= idx <= len(slot_suggestions):
+                            selected = slot_suggestions[idx - 1]
+                    except LLMRouterError as exc:
+                        logger.warning("LLM slot selection skipped: %s", exc)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        logger.error("LLM slot selection error: %s", exc, exc_info=True)
                 if selected and service_code and conversation.patient:
                     service = conversation.clinic.services.filter(code=service_code).first()
                     try:
@@ -427,6 +442,29 @@ class DialogOrchestrator:
             return None
 
         normalized = normalize_text(reply)
+        any_time_tokens = (
+            "any time",
+            "anytime",
+            "whenever",
+            "no preference",
+            "first available",
+            "earliest",
+            "soonest",
+            "اي وقت",
+            "أي وقت",
+            "اي وقت مناسب",
+            "أي وقت مناسب",
+            "اي موعد",
+            "أي موعد",
+            "اول وقت",
+            "أول وقت",
+            "اقرب وقت",
+            "أقرب وقت",
+            "اسرع وقت",
+            "أسرع وقت",
+        )
+        if any(token in normalized for token in any_time_tokens):
+            return slot_suggestions[0]
         ordinal_map = {
             "first": 1,
             "1st": 1,
