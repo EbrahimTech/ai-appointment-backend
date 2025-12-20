@@ -491,6 +491,41 @@ class DialogOrchestrator:
                 matched = token in normalized
             if matched and idx <= len(slot_suggestions):
                 return slot_suggestions[idx - 1]
+        time_match = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", normalized)
+        meridiem_match = re.search(r"\b([1-9]|1[0-2])\s*(am|pm|ص|م)\b", normalized)
+        target_minutes = None
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
+            target_minutes = hour * 60 + minute
+        elif meridiem_match:
+            hour = int(meridiem_match.group(1))
+            minute = 0
+            meridiem = meridiem_match.group(2).lower()
+            if meridiem in {"pm", "م"} and hour != 12:
+                hour += 12
+            if meridiem in {"am", "ص"} and hour == 12:
+                hour = 0
+            target_minutes = hour * 60 + minute
+        if target_minutes is not None:
+            tz = ZoneInfo(clinic_timezone or "UTC")
+            closest_slot = None
+            closest_delta = None
+            for slot in slot_suggestions:
+                try:
+                    start_dt = datetime.fromisoformat(slot.get("start", ""))
+                except (TypeError, ValueError):
+                    continue
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=tz)
+                local_start = start_dt.astimezone(tz)
+                slot_minutes = local_start.hour * 60 + local_start.minute
+                delta = abs(slot_minutes - target_minutes)
+                if closest_delta is None or delta < closest_delta:
+                    closest_delta = delta
+                    closest_slot = slot
+            if closest_slot:
+                return closest_slot
         for idx, slot in enumerate(slot_suggestions):
             if re.search(rf"\b{idx + 1}\b", normalized):
                 return slot

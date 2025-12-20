@@ -491,7 +491,8 @@ class LLMRouter:
             "You are a scheduling assistant. Choose which slot best matches the user's reply. "
             "Return only JSON: {\"index\": 1} or {\"index\": null}. "
             "If the user says any time / first available, choose 1. "
-            "If no slot matches, return null."
+            "If the user mentions a time (e.g., 10am, 14:30), choose the closest slot. "
+            "Prefer the closest reasonable match instead of null."
         )
         messages = [
             {"role": "system", "content": system},
