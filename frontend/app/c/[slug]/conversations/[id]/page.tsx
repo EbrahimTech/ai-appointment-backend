@@ -19,6 +19,11 @@ type ConversationDetail = {
   lang: string;
   fsm_state: string;
   handoff: boolean;
+  patient?: {
+    id: number;
+    full_name: string;
+    ai_enabled: boolean;
+  };
   messages: Message[];
 };
 
@@ -49,6 +54,7 @@ export default function ConversationDetailPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replyMessage, setReplyMessage] = useState<string | null>(null);
+  const [patientToggleError, setPatientToggleError] = useState<string | null>(null);
 
   const conversationQuery = useQuery({
     queryKey: ["conversation-detail", slug, conversationId],
@@ -74,6 +80,11 @@ export default function ConversationDetailPage() {
     },
     enabled: !!lang,
   });
+
+  const orderedMessages = useMemo(() => {
+    const items = [...(conversationQuery.data?.messages ?? [])];
+    return items.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+  }, [conversationQuery.data?.messages]);
 
   useEffect(() => {
     if (conversationQuery.data?.lang) {
@@ -140,6 +151,8 @@ export default function ConversationDetailPage() {
       setReplyMessage("Reply sent successfully.");
       setError(null);
       setPreview(null);
+      setDirectMessage("");
+      setVariablesJSON("{}");
       conversationQuery.refetch();
     },
     onError: (err: Error) => {
@@ -163,6 +176,34 @@ export default function ConversationDetailPage() {
     onSuccess: () => {
       conversationQuery.refetch();
       templatesQuery.refetch();
+    },
+  });
+
+  const patientAiToggle = useMutation({
+    mutationFn: async (nextEnabled: boolean) => {
+      if (!conversationQuery.data?.patient?.id) {
+        throw new Error("PATIENT_NOT_FOUND");
+      }
+      const response = await fetch(
+        `/api/proxy/clinic/${slug}/patients/${conversationQuery.data.patient.id}/ai`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ai_enabled: nextEnabled }),
+        }
+      );
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "AI_TOGGLE_FAILED");
+      }
+      return payload.data;
+    },
+    onSuccess: () => {
+      setPatientToggleError(null);
+      conversationQuery.refetch();
+    },
+    onError: (err: Error) => {
+      setPatientToggleError(humanizeError(err.message));
     },
   });
 
@@ -193,6 +234,7 @@ export default function ConversationDetailPage() {
 
   const conversation = conversationQuery.data;
   const templates = templatesQuery.data ?? [];
+  const patient = conversation.patient;
 
   function handlePreview() {
     setReplyMessage(null);
@@ -300,8 +342,36 @@ export default function ConversationDetailPage() {
           </div>
         ) : null}
 
+        {patient ? (
+          <div className="mt-4 rounded-md border bg-slate-50 px-4 py-3 text-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-semibold text-gray-900">AI for {patient.full_name}</p>
+                <p className="text-xs text-gray-600">
+                  Disable to route this patient directly to human support.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  checked={!!patient.ai_enabled}
+                  onChange={(event) => patientAiToggle.mutate(event.target.checked)}
+                  disabled={patientAiToggle.isPending}
+                />
+                <span className="text-sm font-medium text-gray-800">
+                  {patient.ai_enabled ? "Enabled" : "Disabled"}
+                </span>
+              </label>
+            </div>
+            {patientToggleError ? (
+              <p className="mt-2 text-xs text-red-600">{patientToggleError}</p>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="mt-6 space-y-4">
-          {conversation.messages.map((message) => (
+          {orderedMessages.map((message) => (
             <article
               key={message.id}
               className={`flex gap-3 rounded-lg border px-4 py-3 text-sm ${
@@ -549,6 +619,8 @@ export default function ConversationDetailPage() {
 
 function humanizeError(code: string | undefined) {
   switch (code) {
+    case "PATIENT_NOT_FOUND":
+      return "Patient record not found for this conversation.";
     case "INVALID_TEMPLATE":
       return "Please select a valid template.";
     case "LINT_FAILED":
@@ -561,6 +633,8 @@ function humanizeError(code: string | undefined) {
       return "Please enter a message to send.";
     case "MESSAGE_TOO_LONG":
       return "Message is too long. Please keep it under 4096 characters.";
+    case "AI_TOGGLE_FAILED":
+      return "Failed to update AI setting for this patient.";
     default:
       return code || "Something went wrong. Please try again.";
   }
