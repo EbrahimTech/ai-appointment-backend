@@ -191,7 +191,7 @@ class LLMRouter:
         language: str,
         prompt: str,
         conversation_id: int | None = None,
-    ) -> tuple[str | None, list[SuggestedSlot]]:
+    ) -> tuple[str | None, list[SuggestedSlot], dict | None]:
         """Attempt a tool call for availability queries, else return a reply."""
         if not self.api_key:
             raise LLMRouterError("DeepSeek API key not configured.")
@@ -209,22 +209,23 @@ class LLMRouter:
 
         plan = self._plan_tool_call(clinic=clinic, language=language, prompt=prompt)
         if not plan:
-            return None, []
+            return None, [], None
 
         if "reply" in plan:
-            return str(plan.get("reply") or ""), []
+            return str(plan.get("reply") or ""), [], None
 
         tool_name = plan.get("tool")
         if tool_name != "get_available_slots":
-            return str(plan.get("reply") or ""), []
+            return str(plan.get("reply") or ""), [], None
 
         tool_result = self._tool_get_available_slots(clinic, plan.get("args") or {})
         slots = tool_result.get("slots", [])
+        meta = {"service_code": tool_result.get("service_code")}
         if not slots:
-            return self._finalize_tool_reply(language, prompt, []), []
+            return self._finalize_tool_reply(language, prompt, []), [], meta
 
         reply = self._finalize_tool_reply(language, prompt, slots)
-        return reply, slots
+        return reply, slots, meta
 
     # ------------------------------------------------------------------ intent classification
     def classify_intent(
@@ -421,32 +422,29 @@ class LLMRouter:
             end=end_local,
             limit=limit,
         )
-        return {"slots": slots, "tz": clinic.tz or "UTC"}
+        return {"slots": slots, "tz": clinic.tz or "UTC", "service_code": service_code}
 
     def _finalize_tool_reply(self, language: str, prompt: str, slots: list[SuggestedSlot]) -> str:
-        slot_lines = []
-        for slot in slots[:3]:
-            label = slot.start.strftime("%A %d %b %I:%M %p")
-            slot_lines.append(f"- {label}")
-        slot_text = "\n".join(slot_lines) if slot_lines else "No slots available."
+        lang = (language or "en").lower()
+        if not slots:
+            return "لا توجد مواعيد متاحة حالياً. هل تود وقتاً آخر؟" if lang == "ar" else "No slots are available right now. Would you like another time?"
 
-        system = (
-            "You are a dental clinic appointment assistant. "
-            "Use the provided slots if any. "
-            "Respond in the requested language. "
-            "Keep it concise and ask the user to pick a time."
-        )
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": f"User: {prompt}\nAvailable slots:\n{slot_text}"},
-        ]
-        return self._send_llm_request(
-            messages=messages,
-            prompt=prompt,
-            model=self.model,
-            max_tokens=240,
-            temperature=0.2,
-        )
+        tentative_note = " (حجز مبدئي)" if lang == "ar" else " (tentative hold)"
+        lines: list[str] = []
+        for idx, slot in enumerate(slots[:3], start=1):
+            label = slot.start.strftime("%A %d %b %I:%M %p")
+            if slot.tentative:
+                label += tentative_note
+            lines.append(f"{idx}) {label}")
+
+        if lang == "ar":
+            intro = "هذه أقرب الأوقات المتاحة:"
+            outro = "اختر رقم الموعد المناسب."
+        else:
+            intro = "Here are the next available times:"
+            outro = "Reply with the number of the time that works for you."
+
+        return f"{intro}\n" + "\n".join(lines) + f"\n{outro}"
 
     def _parse_tool_datetime(self, raw: str | None, tzinfo: ZoneInfo) -> datetime | None:
         if not raw:

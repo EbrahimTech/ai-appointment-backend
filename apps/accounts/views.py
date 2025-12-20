@@ -595,83 +595,19 @@ class ClinicAppointmentCreateView(APIView):
         if start_local is None:
             return error_response("OUT_OF_HOURS", status_code=400)
 
-        duration = timedelta(minutes=service.duration_minutes)
-        end_local = start_local + duration
-
-        if not _is_within_service_hours(service, start_local, end_local):
-            return error_response("OUT_OF_HOURS", status_code=400)
-
-        google_available, google_failed = _check_google_availability(
-            clinic, start_local, end_local
+        appointment, error_code, tentative = book_appointment(
+            clinic=clinic,
+            patient=patient,
+            service=service,
+            start_local=start_local,
+            source="clinic_portal",
         )
-
-        if not google_available:
-            return error_response("SLOT_TAKEN", status_code=409)
-
-        start_utc = start_local.astimezone(dt_timezone.utc)
-        end_utc = end_local.astimezone(dt_timezone.utc)
-
-        with transaction.atomic():
-            if _has_overlap(clinic, service, start_utc, end_utc):
-                return error_response("SLOT_TAKEN", status_code=409)
-            try:
-                appointment = Appointment.objects.create(
-                    clinic=clinic,
-                    patient=patient,
-                    service=service,
-                    slot=(start_utc, end_utc),
-                    status=AppointmentStatus.BOOKED,
-                )
-            except IntegrityError:
-                return error_response("SLOT_TAKEN", status_code=409)
-
-        warning = None
-        credential = _get_google_credential(clinic)
-
-        if google_failed:
-            appointment.sync_state = AppointmentSyncState.TENTATIVE
-            appointment.google_retry_count = 0
-            appointment.google_last_error = "google_sync_pending"
-            appointment.save(
-                update_fields=["sync_state", "google_retry_count", "google_last_error", "updated_at"]
-            )
-            warning = "GOOGLE_TENTATIVE"
-            schedule_google_calendar_retry(appointment.id)
-        elif credential:
-            try:
-                calendar_event = GoogleCalendarService().create_event(appointment, credential)
-                appointment.external_event_id = calendar_event.external_event_id
-                appointment.sync_state = AppointmentSyncState.OK
-                appointment.google_retry_count = 0
-                appointment.google_last_error = ""
-                appointment.save(
-                    update_fields=[
-                        "external_event_id",
-                        "sync_state",
-                        "google_retry_count",
-                        "google_last_error",
-                        "updated_at",
-                    ]
-                )
-            except GoogleCalendarServiceError:
-                appointment.sync_state = AppointmentSyncState.TENTATIVE
-                appointment.google_retry_count = 1
-                appointment.google_last_error = "google_sync_error"
-                appointment.save(
-                    update_fields=["sync_state", "google_retry_count", "google_last_error", "updated_at"]
-                )
-                warning = "GOOGLE_TENTATIVE"
-                schedule_google_calendar_retry(appointment.id)
-        else:
-            appointment.sync_state = AppointmentSyncState.OK
-            appointment.google_retry_count = 0
-            appointment.google_last_error = ""
-            appointment.save(
-                update_fields=["sync_state", "google_retry_count", "google_last_error", "updated_at"]
-            )
+        if error_code:
+            status_code = 409 if error_code == "SLOT_TAKEN" else 400
+            return error_response(error_code, status_code=status_code)
 
         data = {"appointment": _serialize_appointment(appointment)}
-        if warning:
+        if tentative:
             data["google_tentative"] = True
         return ok_response(data)
 
@@ -1919,6 +1855,95 @@ def _has_overlap(
 
 def _get_google_credential(clinic: Clinic) -> Optional[GoogleCredential]:
     return clinic.google_credentials.order_by("-updated_at").first()
+
+
+def book_appointment(
+    *,
+    clinic: Clinic,
+    patient,
+    service,
+    start_local: datetime,
+    source: str = "assistant",
+) -> tuple[Appointment | None, str | None, bool]:
+    """Create an appointment and sync with Google if possible."""
+    if not start_local or not service or not patient:
+        return None, "INVALID_SERVICE", False
+
+    duration = timedelta(minutes=service.duration_minutes)
+    end_local = start_local + duration
+    if not _is_within_service_hours(service, start_local, end_local):
+        return None, "OUT_OF_HOURS", False
+
+    google_available, google_failed = _check_google_availability(
+        clinic, start_local, end_local
+    )
+    if not google_available:
+        return None, "SLOT_TAKEN", False
+
+    start_utc = start_local.astimezone(dt_timezone.utc)
+    end_utc = end_local.astimezone(dt_timezone.utc)
+
+    with transaction.atomic():
+        if _has_overlap(clinic, service, start_utc, end_utc):
+            return None, "SLOT_TAKEN", False
+        try:
+            appointment = Appointment.objects.create(
+                clinic=clinic,
+                patient=patient,
+                service=service,
+                slot=(start_utc, end_utc),
+                status=AppointmentStatus.BOOKED,
+                source=source,
+            )
+        except IntegrityError:
+            return None, "SLOT_TAKEN", False
+
+    warning = False
+    credential = _get_google_credential(clinic)
+
+    if google_failed:
+        appointment.sync_state = AppointmentSyncState.TENTATIVE
+        appointment.google_retry_count = 0
+        appointment.google_last_error = "google_sync_pending"
+        appointment.save(
+            update_fields=["sync_state", "google_retry_count", "google_last_error", "updated_at"]
+        )
+        warning = True
+        schedule_google_calendar_retry(appointment.id)
+    elif credential:
+        try:
+            calendar_event = GoogleCalendarService().create_event(appointment, credential)
+            appointment.external_event_id = calendar_event.external_event_id
+            appointment.sync_state = AppointmentSyncState.OK
+            appointment.google_retry_count = 0
+            appointment.google_last_error = ""
+            appointment.save(
+                update_fields=[
+                    "external_event_id",
+                    "sync_state",
+                    "google_retry_count",
+                    "google_last_error",
+                    "updated_at",
+                ]
+            )
+        except GoogleCalendarServiceError:
+            appointment.sync_state = AppointmentSyncState.TENTATIVE
+            appointment.google_retry_count = 1
+            appointment.google_last_error = "google_sync_error"
+            appointment.save(
+                update_fields=["sync_state", "google_retry_count", "google_last_error", "updated_at"]
+            )
+            warning = True
+            schedule_google_calendar_retry(appointment.id)
+    else:
+        appointment.sync_state = AppointmentSyncState.OK
+        appointment.google_retry_count = 0
+        appointment.google_last_error = ""
+        appointment.save(
+            update_fields=["sync_state", "google_retry_count", "google_last_error", "updated_at"]
+        )
+
+    return appointment, None, warning
 
 
 def _serialize_appointment(appointment: Appointment) -> Dict[str, object]:
