@@ -283,11 +283,14 @@ class DialogOrchestrator:
                             time_label = start_local.astimezone(
                                 ZoneInfo(conversation.clinic.tz or "UTC")
                             ).strftime("%A %d %b %I:%M %p")
+                            suffix = ""
+                            if tentative:
+                                suffix = AR_TENTATIVE_NOTE if language == "ar" else " (tentative hold)"
                             if language == "ar":
-                                response_text = f"تم حجز موعدك بنجاح في {time_label}."
+                                response_text = f"تم حجز موعدك في {time_label}.{suffix}"
                             else:
-                                response_text = f"Your appointment is booked for {time_label}."
-                            queue_session = False
+                                response_text = f"Your appointment is booked for {time_label}.{suffix}"
+                            queue_session = True
                         else:
                             error_text = "That slot is no longer available. Please choose another time."
                             if language == "ar":
@@ -424,6 +427,32 @@ class DialogOrchestrator:
             return None
 
         normalized = normalize_text(reply)
+        ordinal_map = {
+            "first": 1,
+            "1st": 1,
+            "one": 1,
+            "second": 2,
+            "2nd": 2,
+            "two": 2,
+            "third": 3,
+            "3rd": 3,
+            "three": 3,
+            "الأول": 1,
+            "الاول": 1,
+            "اول": 1,
+            "الثاني": 2,
+            "الثانى": 2,
+            "الثالث": 3,
+            "الرابع": 4,
+            "الخامس": 5,
+        }
+        for token, idx in ordinal_map.items():
+            if token.isascii():
+                matched = re.search(rf"\b{re.escape(token)}\b", normalized)
+            else:
+                matched = token in normalized
+            if matched and idx <= len(slot_suggestions):
+                return slot_suggestions[idx - 1]
         for idx, slot in enumerate(slot_suggestions):
             if re.search(rf"\b{idx + 1}\b", normalized):
                 return slot
