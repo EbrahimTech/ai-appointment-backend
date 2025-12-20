@@ -435,18 +435,10 @@ class ClinicConversationDetailView(APIView):
             )
 
             update_fields = ["updated_at"]
-            if conversation.handoff_required:
-                conversation.handoff_required = False
-                update_fields.append("handoff_required")
             if (conversation.fsm_state or "").lower() == "done":
                 conversation.fsm_state = "idle"
                 update_fields.append("fsm_state")
             conversation.save(update_fields=update_fields)
-
-            if "handoff_required" in update_fields:
-                Notification.objects.filter(
-                    conversation=conversation, status=NotificationStatus.NEW
-                ).update(status=NotificationStatus.READ, updated_at=timezone.now())
 
             # Prepare audit log metadata
             audit_meta = {
