@@ -3,6 +3,28 @@ from django.contrib import admin
 from apps.conversations.models import Conversation, ConversationMessage, SessionState
 
 
+class ConversationMessageInline(admin.TabularInline):
+    model = ConversationMessage
+    fields = ("direction", "language", "short_body", "created_at")
+    readonly_fields = ("short_body", "created_at")
+    extra = 0
+    show_change_link = True
+
+    def short_body(self, obj: ConversationMessage) -> str:
+        body = obj.body or ""
+        return body if len(body) <= 80 else f"{body[:77]}..."
+
+    short_body.short_description = "Body"
+
+
+class SessionStateInline(admin.StackedInline):
+    model = SessionState
+    fields = ("last_nudged_at", "slot_offer_payload", "context", "llm_guardrails", "updated_at")
+    readonly_fields = ("last_nudged_at", "slot_offer_payload", "context", "llm_guardrails", "updated_at")
+    can_delete = False
+    extra = 0
+
+
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
     list_display = (
@@ -26,6 +48,7 @@ class ConversationAdmin(admin.ModelAdmin):
     ordering = ("-updated_at",)
     raw_id_fields = ("patient",)
     readonly_fields = ("created_at", "updated_at")
+    inlines = [SessionStateInline, ConversationMessageInline]
 
 
 @admin.register(ConversationMessage)

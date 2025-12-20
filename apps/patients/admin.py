@@ -1,6 +1,23 @@
 from django.contrib import admin
 
+from apps.conversations.models import Conversation
 from apps.patients.models import Patient, PatientNote
+
+
+class ConversationInline(admin.TabularInline):
+    model = Conversation
+    fields = ("id", "fsm_state", "handoff_required", "last_intent", "updated_at")
+    readonly_fields = ("updated_at",)
+    extra = 0
+    show_change_link = True
+
+
+class PatientNoteInline(admin.TabularInline):
+    model = PatientNote
+    fields = ("author", "body", "created_at")
+    readonly_fields = ("created_at",)
+    extra = 0
+    show_change_link = True
 
 
 @admin.register(Patient)
@@ -19,6 +36,7 @@ class PatientAdmin(admin.ModelAdmin):
     list_select_related = ("clinic",)
     ordering = ("-created_at",)
     readonly_fields = ("created_at", "updated_at")
+    inlines = [ConversationInline, PatientNoteInline]
 
 
 @admin.register(PatientNote)
