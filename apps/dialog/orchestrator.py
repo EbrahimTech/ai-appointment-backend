@@ -249,19 +249,12 @@ class DialogOrchestrator:
                 intent=intent,
             )
             if response_text:
-                ConversationMessage.objects.create(
+                response_text = self._send_outbound_message(
                     conversation=conversation,
-                    direction="outbound",
                     language=language,
                     body=response_text,
                     intent="book",
                     metadata={"auto_reply": True, "flow": "booking"},
-                )
-                enqueue_whatsapp_session_message(
-                    clinic_id=conversation.clinic_id,
-                    conversation=conversation,
-                    language=language,
-                    message_body=response_text,
                     idempotency_key=f"booking:{conversation.id}:{inbound_message.id}",
                 )
                 return response_text, "book"
@@ -275,19 +268,12 @@ class DialogOrchestrator:
         )
         if action_reply:
             response_text, action_intent = action_reply
-            ConversationMessage.objects.create(
+            response_text = self._send_outbound_message(
                 conversation=conversation,
-                direction="outbound",
                 language=language,
                 body=response_text,
                 intent=action_intent,
                 metadata={"auto_reply": True, "flow": "action"},
-            )
-            enqueue_whatsapp_session_message(
-                clinic_id=conversation.clinic_id,
-                conversation=conversation,
-                language=language,
-                message_body=response_text,
                 idempotency_key=f"action:{conversation.id}:{inbound_message.id}",
             )
             return response_text, action_intent
@@ -341,19 +327,12 @@ class DialogOrchestrator:
                 logger.warning("Failed to create handoff notification: %s", err)
 
             response_text = AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
-            ConversationMessage.objects.create(
+            response_text = self._send_outbound_message(
                 conversation=conversation,
-                direction="outbound",
                 language=language,
                 body=response_text,
                 intent="handoff",
                 metadata={"auto_reply": True, "reason": "repeat_intent_threshold"},
-            )
-            enqueue_whatsapp_session_message(
-                clinic_id=conversation.clinic_id,
-                conversation=conversation,
-                language=language,
-                message_body=response_text,
                 idempotency_key=f"handoff:{conversation.id}:{inbound_message.id}",
             )
             return response_text, "handoff"
@@ -697,24 +676,99 @@ class DialogOrchestrator:
                             logger.warning("Failed to create handoff notification: %s", err)
 
         if response_text:
-            ConversationMessage.objects.create(
+            response_text = self._send_outbound_message(
                 conversation=conversation,
-                direction="outbound",
                 language=language,
                 body=response_text,
                 intent="reply",
                 metadata={"auto_reply": True},
+                idempotency_key=f"{conversation.id}:{inbound_message.id}",
+                queue_session=queue_session,
             )
-            if queue_session:
-                enqueue_whatsapp_session_message(
-                    clinic_id=conversation.clinic_id,
-                    conversation=conversation,
-                    language=language,
-                    message_body=response_text,
-                    # Ensure each inbound message yields its own outbound send, even if text matches
-                    idempotency_key=f"{conversation.id}:{inbound_message.id}",
-                )
         return response_text, intent
+
+    def _send_outbound_message(
+        self,
+        *,
+        conversation: Conversation,
+        language: str,
+        body: str | None,
+        intent: str,
+        metadata: dict,
+        idempotency_key: str,
+        queue_session: bool = True,
+    ) -> str:
+        clean_body = self._sanitize_response(conversation, body or "", language)
+        if not clean_body:
+            clean_body = (
+                AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+            )
+        ConversationMessage.objects.create(
+            conversation=conversation,
+            direction="outbound",
+            language=language,
+            body=clean_body,
+            intent=intent,
+            metadata=metadata,
+        )
+        if queue_session:
+            enqueue_whatsapp_session_message(
+                clinic_id=conversation.clinic_id,
+                conversation=conversation,
+                language=language,
+                message_body=clean_body,
+                idempotency_key=idempotency_key,
+            )
+        return clean_body
+
+    def _sanitize_response(self, conversation: Conversation, text: str, language: str) -> str:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return cleaned
+        cleaned = self._strip_service_codes(cleaned, conversation, language)
+        cleaned = self._strip_extra_questions(cleaned)
+        if language == "ar":
+            cleaned = re.sub(r"\(\s*[A-Za-z0-9 _-]+\s*\)", "", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+        cleaned = re.sub(r"\(\s*\)", "", cleaned).strip()
+        cleaned = re.sub(r"\s+([,.،:;!?؟])", r"\1", cleaned)
+        return cleaned
+
+    def _strip_service_codes(self, text: str, conversation: Conversation, language: str) -> str:
+        services = list(conversation.clinic.services.filter(is_active=True))
+        lang = (language or "").lower()
+        for service in services:
+            display_name = self._format_service_label(service, conversation.clinic, language)
+            if service.code:
+                text = re.sub(
+                    rf"\(\s*{re.escape(service.code)}\s*\)",
+                    "",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+                text = re.sub(
+                    rf"(?<!\w){re.escape(service.code)}(?!\w)",
+                    display_name,
+                    text,
+                    flags=re.IGNORECASE,
+                )
+            if (
+                lang.startswith("ar")
+                and service.name
+                and any(ch.isascii() and ch.isalpha() for ch in service.name)
+            ):
+                text = re.sub(re.escape(service.name), display_name, text, flags=re.IGNORECASE)
+        return text
+
+    def _strip_extra_questions(self, text: str) -> str:
+        question_marks = [idx for idx in (text.find("?"), text.find("؟")) if idx != -1]
+        if (text.count("?") + text.count("؟")) <= 1 or not question_marks:
+            return text
+        cut_at = min(question_marks)
+        return text[: cut_at + 1].strip()
+
+    def _contains_letters(self, text: str) -> bool:
+        return any(ch.isalpha() for ch in text)
 
     def _handle_booking_flow(
         self,
