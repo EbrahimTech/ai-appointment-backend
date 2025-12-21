@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.postgres",
+    "channels",
     "pgvector.django",
     "rest_framework",
     "rest_framework_simplejwt",

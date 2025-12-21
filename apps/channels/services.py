@@ -192,6 +192,14 @@ def enqueue_whatsapp_message(
             setattr(outbox, field, value)
         outbox.save()
 
+    if outbox.status in {OutboxStatus.PENDING, OutboxStatus.FAILED} and outbox.scheduled_for <= timezone.now():
+        try:
+            from apps.workers.tasks import dispatch_outbox_messages
+
+            dispatch_outbox_messages.delay()
+        except Exception:
+            pass
+
     return outbox
 
 

@@ -408,6 +408,7 @@ class ClinicConversationDetailView(APIView):
                         message_body=rendered_body,
                         hsm_name=hsm_name_to_use or DEFAULT_SESSION_FALLBACK_HSM,
                         variables=variables,
+                        delay_seconds=0,
                         idempotency_key=idempotency_key,
                     )
             except Exception as exc:
