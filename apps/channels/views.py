@@ -41,13 +41,16 @@ def _get_language(message: Dict[str, Any]) -> str:
     return message.get("language", "en")
 
 
-def _detect_language_from_text(text: str) -> str:
+def _detect_language_from_text(text: str) -> Optional[str]:
     """Detect language from text content (simple heuristic)."""
     if not text:
-        return "en"
-    # Simple check for Arabic characters
-    arabic_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF')
-    if arabic_chars > len(text) * 0.3:  # If more than 30% Arabic
+        return None
+    arabic_chars = sum(1 for c in text if "\u0600" <= c <= "\u06FF")
+    latin_chars = sum(1 for c in text if "A" <= c <= "Z" or "a" <= c <= "z")
+    total_letters = arabic_chars + latin_chars
+    if total_letters == 0:
+        return None
+    if arabic_chars / total_letters > 0.3:
         return "ar"
     return "en"
 
