@@ -10,6 +10,7 @@ from typing import Iterable, List, Tuple
 from zoneinfo import ZoneInfo
 
 import requests
+import re
 from django.conf import settings
 from django.db.models import Sum
 from django.utils import timezone
@@ -218,7 +219,20 @@ class LLMRouter:
             return None, [], None
 
         if "reply" in plan:
-            return str(plan.get("reply") or ""), [], None
+            reply = str(plan.get("reply") or "")
+            reply = self._sanitize_planner_reply(reply, clinic)
+            if self._reply_requests_service(reply, language):
+                services = list(clinic.services.filter(is_active=True))
+                if len(services) == 1:
+                    service = services[0]
+                    tool_result = self._tool_get_available_slots(
+                        clinic, {"service_code": service.code, "limit": 3}
+                    )
+                    slots = tool_result.get("slots") or []
+                    if slots:
+                        reply = self._finalize_tool_reply(language, prompt, slots)
+                        return reply, slots, {"service_code": service.code}
+            return reply, [], None
 
         tool_name = plan.get("tool")
         return self.execute_tool_call(
@@ -305,15 +319,27 @@ class LLMRouter:
 
             error = tool_result.get("error")
             if error == "missing_service":
+                if language == "ar":
+                    return "ما الخدمة التي ترغب بحجزها؟", [], None
                 return "Which service would you like to book?", [], None
             if error == "missing_time":
+                if language == "ar":
+                    return "ما الوقت المناسب لك؟", [], None
                 return "What time works for you?", [], None
             if error == "OUT_OF_HOURS":
+                if language == "ar":
+                    return "هذا الوقت خارج ساعات العمل. يرجى اختيار وقت آخر.", [], None
                 return "That time is outside our working hours. Please choose another time.", [], None
             if error == "SLOT_TAKEN":
+                if language == "ar":
+                    return "هذا الوقت لم يعد متاحًا. يرجى اختيار وقت آخر.", [], None
                 return "That time is no longer available. Please choose another time.", [], None
             if error == "missing_patient":
+                if language == "ar":
+                    return "أحتاج اسمك قبل إتمام الحجز. يرجى مشاركته.", [], None
                 return "I need your details before I can book. Please share your name.", [], None
+            if language == "ar":
+                return "لم أتمكن من حجز هذا الوقت. يرجى اختيار وقت آخر.", [], None
             return "I could not book that time. Please choose another time.", [], None
 
         if tool_name == "cancel_appointment":
@@ -353,11 +379,19 @@ class LLMRouter:
 
             error = tool_result.get("error")
             if error == "missing_patient":
+                if language == "ar":
+                    return "أحتاج اسمك قبل إلغاء الموعد. يرجى مشاركته.", [], None
                 return "I need your details before I can cancel. Please share your name.", [], None
             if error == "no_upcoming":
+                if language == "ar":
+                    return "لم أجد موعدًا قادمًا لإلغائه.", [], None
                 return "I couldn't find an upcoming appointment to cancel.", [], None
             if error == "not_found":
+                if language == "ar":
+                    return "لم أتمكن من مطابقة الموعد. يرجى ذكر التاريخ والوقت.", [], None
                 return "I couldn't match that appointment. Please share the date/time.", [], None
+            if language == "ar":
+                return "لم أتمكن من إلغاء الموعد. يرجى ذكر التاريخ والوقت.", [], None
             return "I couldn't cancel that appointment. Please share the date/time.", [], None
 
         if tool_name == "reschedule_appointment":
@@ -410,17 +444,31 @@ class LLMRouter:
 
             error = tool_result.get("error")
             if error == "missing_patient":
+                if language == "ar":
+                    return "أحتاج اسمك قبل إعادة الجدولة. يرجى مشاركته.", [], None
                 return "I need your details before I can reschedule. Please share your name.", [], None
             if error == "missing_service":
+                if language == "ar":
+                    return "ما الخدمة التي ترغب بإعادة جدولتها؟", [], None
                 return "Which service would you like to reschedule?", [], None
             if error == "missing_time":
+                if language == "ar":
+                    return "ما الوقت الذي تفضله بدلًا من ذلك؟", [], None
                 return "What time would you like instead?", [], None
             if error == "no_upcoming":
+                if language == "ar":
+                    return "لم أجد موعدًا قادمًا لإعادة جدولته.", [], None
                 return "I couldn't find an upcoming appointment to reschedule.", [], None
             if error == "SLOT_TAKEN":
+                if language == "ar":
+                    return "هذا الوقت لم يعد متاحًا. يرجى اختيار وقت آخر.", [], None
                 return "That time is no longer available. Please choose another time.", [], None
             if error == "OUT_OF_HOURS":
+                if language == "ar":
+                    return "هذا الوقت خارج ساعات العمل. يرجى اختيار وقت آخر.", [], None
                 return "That time is outside our working hours. Please choose another time.", [], None
+            if language == "ar":
+                return "لم أتمكن من إعادة الجدولة. يرجى ذكر الوقت الجديد.", [], None
             return "I couldn't reschedule that appointment. Please share a new time.", [], None
 
         if tool_name != "get_available_slots":
@@ -1030,6 +1078,21 @@ class LLMRouter:
             outro = "Reply with the number of the time that works for you."
 
         return f"{intro}\n" + "\n".join(lines) + f"\n{outro}"
+
+    def _sanitize_planner_reply(self, reply: str, clinic: Clinic) -> str:
+        services = list(clinic.services.filter(is_active=True))
+        for service in services:
+            if not service.code:
+                continue
+            reply = re.sub(rf"\b{re.escape(service.code)}\b", service.name, reply)
+        return reply
+
+    def _reply_requests_service(self, reply: str, language: str) -> bool:
+        lowered = (reply or "").lower()
+        if "service" in lowered:
+            return True
+        return "????" in reply or "??????" in reply
+
 
     def select_slot_from_reply(
         self,

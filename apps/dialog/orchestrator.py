@@ -492,11 +492,15 @@ class DialogOrchestrator:
                             response_text = error_text
                             queue_session = True
                     else:
-                        response_text = (
-                            "Please choose one of the suggested times (e.g., 1 or 2)."
-                            if language != "ar"
-                            else "يرجى اختيار أحد الأوقات المقترحة (مثال: 1 أو 2)."
-                        )
+                        slot_prompt = session_state.context.get("slot_offer_prompt")
+                        if slot_prompt:
+                            response_text = slot_prompt
+                        else:
+                            response_text = (
+                                "Please choose one of the suggested times (e.g., 1 or 2)."
+                                if language != "ar"
+                                else "يرجى اختيار أحد الأوقات المقترحة (مثال: 1 أو 2)."
+                            )
                         queue_session = True
                 elif selected and service_code and conversation.patient:
                     service = conversation.clinic.services.filter(code=service_code).first()
@@ -552,11 +556,15 @@ class DialogOrchestrator:
                         response_text = self._handle_terminal_intent(conversation, intent, language)
                         queue_session = True
                 elif slot_suggestions:
-                    response_text = (
-                        "Please choose one of the suggested times (e.g., 1 or 2)."
-                        if language != "ar"
-                        else "يرجى اختيار أحد الأوقات المقترحة (مثال: 1 أو 2)."
-                    )
+                    slot_prompt = session_state.context.get("slot_offer_prompt")
+                    if slot_prompt:
+                        response_text = slot_prompt
+                    else:
+                        response_text = (
+                            "Please choose one of the suggested times (e.g., 1 or 2)."
+                            if language != "ar"
+                            else "يرجى اختيار أحد الأوقات المقترحة (مثال: 1 أو 2)."
+                        )
                     queue_session = True
                 else:
                     response_text = self._handle_terminal_intent(conversation, intent, language)
