@@ -131,7 +131,7 @@ export default function ClinicSettingsPage() {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const isReadOnly = Boolean(support);
+  const isReadOnly = support?.readOnly ?? false;
   const clinicData = isEditing ? formData : clinicQuery.data;
 
   if (clinicQuery.isLoading) {
@@ -506,3 +506,4 @@ export default function ClinicSettingsPage() {
     </div>
   );
 }
+

@@ -90,7 +90,13 @@ export default function TenantDetailPage() {
       return payload.data as { support_token: string; expires_at: string };
     },
     onSuccess: (data) => {
-      setSupport({ token: data.support_token, clinicSlug: slug, expiresAt: data.expires_at ?? null });
+      setSupport({
+        token: data.support_token,
+        clinicSlug: slug,
+        expiresAt: data.expires_at ?? null,
+        readOnly: true,
+        hqRole: null,
+      });
       setFeedback(`Impersonation started. Session expires at ${new Date(data.expires_at).toLocaleString()}.`);
       setError(null);
     },
@@ -175,6 +181,7 @@ export default function TenantDetailPage() {
   }
 
   const isImpersonating = support?.clinicSlug === slug;
+  const supportAccessLabel = support?.readOnly ? "read-only access" : "full admin access";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -375,7 +382,7 @@ export default function TenantDetailPage() {
           {isImpersonating ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mb-4">
               <p className="text-sm text-amber-900 mb-3">
-                <strong>Active session:</strong> You are currently impersonating this clinic with full admin access. All actions are logged.
+                <strong>Active session:</strong> You are currently impersonating this clinic with {supportAccessLabel}. All actions are logged.
               </p>
               <button
                 type="button"

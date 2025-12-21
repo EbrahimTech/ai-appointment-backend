@@ -73,7 +73,7 @@ export default function AppointmentsPage() {
   const slug = params.slug;
   const queryClient = useQueryClient();
   const { support } = useSupportSession();
-  const readOnly = Boolean(support);
+  const readOnly = support?.readOnly ?? false;
 
   const [filters, setFilters] = useState({
     from: "",
@@ -1013,3 +1013,4 @@ function humanizeError(code: string | undefined) {
   };
   return map[code] ?? code.replace(/_/g, " ");
 }
+

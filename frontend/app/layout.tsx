@@ -50,7 +50,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   const supportToken = cookieStore.get("supportToken")?.value;
   const supportClinic = cookieStore.get("supportClinicSlug")?.value;
   const supportExpiresAt = cookieStore.get("supportExpiresAt")?.value;
-  const supportSession = supportToken && supportClinic ? { token: supportToken, clinicSlug: supportClinic, expiresAt: supportExpiresAt ?? null } : null;
+  const supportSession = supportToken && supportClinic ? {
+    token: supportToken,
+    clinicSlug: supportClinic,
+    expiresAt: supportExpiresAt ?? null,
+    readOnly: true,
+    hqRole: null,
+  } : null;
   return (
     <html lang={locale} dir={direction}>
       <body>

@@ -115,10 +115,16 @@ class ClinicScopeMiddleware:
             return JsonResponse({"ok": False, "error": "FORBIDDEN"}, status=403)
 
         request.user = session.staff_user
+        staff = getattr(session.staff_user, "staff_account", None)
+        support_role = (
+            ClinicMembership.Role.ADMIN
+            if staff and staff.role == StaffAccount.Role.SUPERADMIN
+            else ClinicMembership.Role.VIEWER
+        )
         membership = ClinicMembership(
             clinic=session.clinic,
             user=session.staff_user,
-            role=ClinicMembership.Role.ADMIN,
+            role=support_role,
         )
         request.clinic_membership = membership
         request.clinic = session.clinic

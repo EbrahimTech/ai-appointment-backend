@@ -32,7 +32,7 @@ export default function TemplatesPage() {
   const slug = params.slug;
   const queryClient = useQueryClient();
   const { support } = useSupportSession();
-  const readOnly = Boolean(support);
+  const readOnly = support?.readOnly ?? false;
 
   const [lang, setLang] = useState<string>("");
   const [search, setSearch] = useState<string>("");
@@ -647,3 +647,4 @@ export default function TemplatesPage() {
     </div>
   );
 }
+

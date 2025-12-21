@@ -28,7 +28,7 @@ export default function UsersPage() {
   const slug = params.slug;
   const queryClient = useQueryClient();
   const { support } = useSupportSession();
-  const readOnly = Boolean(support);
+  const readOnly = support?.readOnly ?? false;
 
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -419,3 +419,4 @@ function humanizeError(code: string | undefined) {
   };
   return map[code] ?? code.replace(/_/g, " ");
 }
+

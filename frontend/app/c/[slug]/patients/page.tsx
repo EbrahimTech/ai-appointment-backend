@@ -55,7 +55,7 @@ export default function PatientsPage() {
   const slug = params.slug;
   const queryClient = useQueryClient();
   const { support } = useSupportSession();
-  const readOnly = Boolean(support);
+  const readOnly = support?.readOnly ?? false;
 
   const [search, setSearch] = useState<string>("");
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -1132,3 +1132,4 @@ export default function PatientsPage() {
     </div>
   );
 }
+

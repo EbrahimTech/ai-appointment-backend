@@ -21,7 +21,7 @@ export default function KnowledgePage() {
   const params = useParams<{ slug: string }>();
   const slug = params.slug;
   const { support } = useSupportSession();
-  const readOnly = Boolean(support);
+  const readOnly = support?.readOnly ?? false;
   const allowedTags = ["service", "policy", "faq", "about", "glossary"];
 
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -344,3 +344,4 @@ export default function KnowledgePage() {
     </main>
   );
 }
+

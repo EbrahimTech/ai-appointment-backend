@@ -10,6 +10,8 @@ type SupportSession = {
   token: string;
   clinicSlug: string;
   expiresAt: string | null;
+  readOnly: boolean;
+  hqRole?: string | null;
 };
 
 type SupportSessionContextValue = {
@@ -64,7 +66,8 @@ function SupportSessionBanner() {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900">
       <span>
-        Impersonating clinic <strong>{support.clinicSlug}</strong>. Read-only actions only (template replies allowed).
+        Impersonating clinic <strong>{support.clinicSlug}</strong>.{" "}
+        {support.readOnly ? "Read-only actions only (template replies allowed)." : "Full access enabled."}
         {support.expiresAt ? ` Session expires at ${new Date(support.expiresAt).toLocaleString()}.` : ""}
       </span>
       <button
@@ -89,6 +92,33 @@ type ProvidersProps = {
 export default function Providers({ locale, messages, initialSupportSession, children }: ProvidersProps) {
   const [queryClient] = useState(() => new QueryClient());
   const [support, setSupportState] = useState<SupportSession | null>(initialSupportSession);
+
+  useEffect(() => {
+    if (!support) {
+      return;
+    }
+    let cancelled = false;
+    const loadRole = async () => {
+      try {
+        const response = await fetch("/api/session/me");
+        if (!response.ok) {
+          return;
+        }
+        const payload = await response.json();
+        const hqRole = payload?.data?.hq_role ?? null;
+        const readOnly = hqRole !== "SUPERADMIN";
+        if (!cancelled) {
+          setSupportState((prev) => (prev ? { ...prev, hqRole, readOnly } : prev));
+        }
+      } catch {
+        // Ignore failures, default to read-only
+      }
+    };
+    loadRole();
+    return () => {
+      cancelled = true;
+    };
+  }, [support?.token]);
 
   const contextValue = useMemo<SupportSessionContextValue>(
     () => ({
