@@ -11,7 +11,7 @@ from django.conf import settings
 from django.utils import timezone
 from zoneinfo import ZoneInfo
 
-from apps.appointments.scheduling import SuggestedSlot, suggest_slots
+from apps.appointments.scheduling import SuggestedSlot, find_available_slots, suggest_slots
 from apps.accounts.views import book_appointment, reschedule_appointment
 from apps.channels.services import enqueue_whatsapp_session_message
 from apps.conversations.models import Conversation, ConversationMessage, SessionState
@@ -324,6 +324,7 @@ class DialogOrchestrator:
                             session_state.context.pop("slot_service_code", None)
                             session_state.context.pop("slot_offer_prompt", None)
                             session_state.context.pop("reschedule_appointment_id", None)
+                            self._clear_booking_flow(session_state)
                             session_state.save(update_fields=["context", "updated_at"])
                         elif tool_slots:
                             session_state.context["slot_suggestions"] = [
@@ -556,6 +557,8 @@ class DialogOrchestrator:
                         if appointment:
                             session_state.context.pop("slot_suggestions", None)
                             session_state.context.pop("slot_service_code", None)
+                            session_state.context.pop("slot_offer_prompt", None)
+                            self._clear_booking_flow(session_state)
                             session_state.save(update_fields=["context", "updated_at"])
                             time_label = start_local.astimezone(
                                 ZoneInfo(conversation.clinic.tz or "UTC")
@@ -655,6 +658,294 @@ class DialogOrchestrator:
                     idempotency_key=f"{conversation.id}:{inbound_message.id}",
                 )
         return response_text, intent
+
+    def _handle_booking_flow(
+        self,
+        *,
+        conversation: Conversation,
+        session_state: SessionState,
+        body: str,
+        language: str,
+        intent: str,
+    ) -> str | None:
+        ctx = session_state.context.get("booking_flow") or {}
+        slots = dict(ctx.get("slots") or {})
+        state = ctx.get("state") or "ASK_REASON"
+        turns = int(ctx.get("turns", 0)) + 1
+        ctx["turns"] = turns
+
+        clinic = conversation.clinic
+        services = list(clinic.services.filter(is_active=True).order_by("name"))
+        if not services:
+            self._clear_booking_flow(session_state)
+            return "لا توجد خدمات متاحة حالياً." if language == "ar" else "No services are available right now."
+
+        if not slots.get("reason"):
+            reason = self._detect_booking_reason(body, language)
+            if reason:
+                slots["reason"] = reason
+        if not slots.get("service_code"):
+            service_code = self._match_service(body, services)
+            if service_code:
+                slots["service_code"] = service_code
+        if not slots.get("date"):
+            date_value = self._extract_date_from_text(body, clinic.tz)
+            if date_value:
+                slots["date"] = date_value.isoformat()
+        if not slots.get("time_window"):
+            time_window = self._detect_time_window(body)
+            if time_window:
+                slots["time_window"] = time_window
+
+        if not slots.get("service_code") and len(services) == 1:
+            slots["service_code"] = services[0].code
+
+        if state == "SHOW_SLOTS":
+            if self._wants_new_time(body):
+                slots.pop("date", None)
+                slots.pop("time_window", None)
+                state = "ASK_DATE"
+            else:
+                slot_prompt = session_state.context.get("slot_offer_prompt")
+                if slot_prompt:
+                    self._record_booking_decision(
+                        session_state,
+                        state=state,
+                        slots=slots,
+                        missing=[],
+                        actions=["show_slots"],
+                        prompt=slot_prompt,
+                    )
+                    return slot_prompt
+
+        missing: list[str] = []
+        if not slots.get("reason"):
+            missing.append("reason")
+        if not slots.get("service_code") and len(services) > 1:
+            missing.append("service")
+        if not slots.get("date"):
+            missing.append("date")
+        if not slots.get("time_window"):
+            missing.append("time_window")
+
+        prompt = ""
+        actions: list[str] = []
+        if "reason" in missing:
+            state = "ASK_REASON"
+            prompt = self._format_reason_prompt(language)
+        elif "service" in missing:
+            state = "ASK_SERVICE"
+            prompt = self._format_service_prompt(language, services)
+        elif "date" in missing:
+            state = "ASK_DATE"
+            prompt = self._format_date_prompt(language)
+        elif "time_window" in missing:
+            state = "ASK_TIME_WINDOW"
+            prompt = self._format_time_window_prompt(language)
+        else:
+            service = clinic.services.filter(code=slots.get("service_code"), is_active=True).first()
+            if not service:
+                service = services[0]
+                slots["service_code"] = service.code
+
+            date_value = date.fromisoformat(slots["date"])
+            start_dt, end_dt = self._window_range(date_value, slots["time_window"], clinic.tz)
+            actions.append("get_available_slots")
+            available = find_available_slots(clinic, service, start=start_dt, end=end_dt, limit=3)
+            if not available:
+                slots.pop("date", None)
+                slots.pop("time_window", None)
+                state = "ASK_DATE"
+                prompt = (
+                    "لا توجد أوقات متاحة في هذا اليوم. ما اليوم المناسب لك؟"
+                    if language == "ar"
+                    else "No availability on that day. What date works for you?"
+                )
+            else:
+                prompt = self._build_slot_prompt(available, language, clinic.tz)
+                session_state.context["slot_suggestions"] = [
+                    {
+                        "start": slot.start.isoformat(),
+                        "end": slot.end.isoformat(),
+                        "tentative": slot.tentative,
+                        "source": slot.source,
+                    }
+                    for slot in available
+                ]
+                session_state.context["slot_service_code"] = service.code
+                session_state.context["slot_offer_prompt"] = prompt
+                self.fsm.apply(conversation, "slot_proposed", context={"message": body})
+                state = "SHOW_SLOTS"
+
+        if state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}:
+            session_state.context.pop("slot_suggestions", None)
+            session_state.context.pop("slot_offer_prompt", None)
+
+        ctx["state"] = state
+        ctx["slots"] = slots
+        session_state.context["booking_flow"] = ctx
+        self._record_booking_decision(
+            session_state,
+            state=state,
+            slots=slots,
+            missing=missing,
+            actions=actions,
+            prompt=prompt,
+        )
+        session_state.save(update_fields=["context", "updated_at"])
+        return prompt
+
+    def _record_booking_decision(
+        self,
+        session_state: SessionState,
+        *,
+        state: str,
+        slots: dict,
+        missing: list[str],
+        actions: list[str],
+        prompt: str,
+    ) -> None:
+        session_state.context["decision"] = {
+            "intent": "book",
+            "state": state,
+            "slots": slots,
+            "missing_slots": missing,
+            "next_question": prompt,
+            "actions": actions,
+        }
+
+    def _clear_booking_flow(self, session_state: SessionState) -> None:
+        session_state.context.pop("booking_flow", None)
+        session_state.context.pop("decision", None)
+
+    def _detect_booking_reason(self, text: str, language: str) -> str | None:
+        lowered = text.lower()
+        reason_map = {
+            "referral": {"تحويل", "محول", "referral"},
+            "cosmetic": {"تجميلي", "تجميل", "ابتسامة", "تبييض", "تقويم", "زراعة", "cosmetic", "whitening", "ortho"},
+            "pain": {"ألم", "وجع", "مؤلم", "ألم الأسنان", "pain", "toothache"},
+            "checkup": {"فحص", "كشف", "استشارة", "تشخيص", "متابعة", "checkup", "exam", "consult"},
+            "other": {"أخرى", "اخرى", "غير ذلك", "other"},
+        }
+        for code, tokens in reason_map.items():
+            if any(token in lowered for token in tokens):
+                return code
+        return None
+
+    def _format_reason_prompt(self, language: str) -> str:
+        if language == "ar":
+            return "ما سبب الزيارة؟ (تحويل/تجميلي/ألم/فحص/أخرى)"
+        return "What is the visit reason? (referral/cosmetic/pain/checkup/other)"
+
+    def _format_service_prompt(self, language: str, services: list) -> str:
+        names = ", ".join([svc.name for svc in services[:4]]) or "service"
+        if language == "ar":
+            return f"ما الخدمة المطلوبة؟ (مثال: {names})"
+        return f"Which service would you like? (e.g., {names})"
+
+    def _format_date_prompt(self, language: str) -> str:
+        if language == "ar":
+            return "ما اليوم المناسب لك؟"
+        return "Which date works for you?"
+
+    def _format_time_window_prompt(self, language: str) -> str:
+        if language == "ar":
+            return "أي فترة تناسبك؟ (صباح/ظهر/مساء/أي وقت)"
+        return "Which time window works for you? (morning/afternoon/evening/any)"
+
+    def _wants_new_time(self, text: str) -> bool:
+        lowered = text.lower()
+        cues = {"وقت آخر", "موعد آخر", "تغيير", "غير مناسب", "another time", "change"}
+        return any(cue in lowered for cue in cues)
+
+    def _asks_for_slots(self, text: str) -> bool:
+        lowered = text.lower()
+        cues = {"المواعيد", "الأوقات", "المتاح", "available times", "available slots"}
+        return any(cue in lowered for cue in cues)
+
+    def _detect_time_window(self, text: str) -> str | None:
+        lowered = text.lower()
+        if any(token in lowered for token in {"أي وقت", "بدون تفضيل", "any time", "anytime"}):
+            return "any"
+        if any(token in lowered for token in {"صباح", "morning"}):
+            return "morning"
+        if any(token in lowered for token in {"ظهر", "عصر", "afternoon", "noon"}):
+            return "afternoon"
+        if any(token in lowered for token in {"مساء", "ليل", "evening", "night"}):
+            return "evening"
+        return None
+
+    def _match_service(self, text: str, services: list) -> str | None:
+        lowered = text.lower()
+        for service in services:
+            if service.name and service.name.lower() in lowered:
+                return service.code
+        for service in services:
+            for token in (service.name or "").lower().split():
+                if token and token in lowered:
+                    return service.code
+        return None
+
+    def _normalize_digits(self, text: str) -> str:
+        return text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+
+    def _extract_date_from_text(self, text: str, clinic_tz: str) -> date | None:
+        if not text:
+            return None
+        lowered = self._normalize_digits(text.lower())
+        tz = ZoneInfo(clinic_tz or "UTC")
+        today = timezone.now().astimezone(tz).date()
+        if any(token in lowered for token in {"today", "اليوم"}):
+            return today
+        if any(token in lowered for token in {"tomorrow", "بكرا", "غدا"}):
+            return today + timedelta(days=1)
+        if any(token in lowered for token in {"after tomorrow", "بعد بكرة", "بعد غد"}):
+            return today + timedelta(days=2)
+
+        match = re.search(r"\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b", lowered)
+        if match:
+            try:
+                return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+            except ValueError:
+                return None
+
+        match = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", lowered)
+        if match:
+            day = int(match.group(1))
+            month = int(match.group(2))
+            year = match.group(3)
+            if year:
+                year_int = int(year)
+                if year_int < 100:
+                    year_int += 2000
+            else:
+                year_int = today.year
+            try:
+                candidate = date(year_int, month, day)
+            except ValueError:
+                return None
+            if candidate < today:
+                try:
+                    candidate = date(year_int + 1, month, day)
+                except ValueError:
+                    return None
+            return candidate
+        return None
+
+    def _window_range(self, date_value: date, time_window: str, clinic_tz: str) -> tuple[datetime, datetime]:
+        tz = ZoneInfo(clinic_tz or "UTC")
+        window = time_window or "any"
+        if window == "morning":
+            start_t, end_t = time(9, 0), time(12, 0)
+        elif window == "afternoon":
+            start_t, end_t = time(12, 0), time(17, 0)
+        elif window == "evening":
+            start_t, end_t = time(17, 0), time(21, 0)
+        else:
+            start_t, end_t = time.min, time(23, 59)
+        start_dt = datetime.combine(date_value, start_t, tzinfo=tz)
+        end_dt = datetime.combine(date_value, end_t, tzinfo=tz)
+        return start_dt, end_dt
 
     def _handle_terminal_intent(self, conversation: Conversation, intent: str, language: str) -> str:
         action = intent
