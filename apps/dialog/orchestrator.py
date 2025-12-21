@@ -12,7 +12,7 @@ from django.utils import timezone
 from zoneinfo import ZoneInfo
 
 from apps.appointments.scheduling import SuggestedSlot, suggest_slots
-from apps.accounts.views import book_appointment
+from apps.accounts.views import book_appointment, reschedule_appointment
 from apps.channels.services import enqueue_whatsapp_session_message
 from apps.conversations.models import Conversation, ConversationMessage, SessionState
 from apps.dialog.fsm import DialogFSM
@@ -147,6 +147,7 @@ class DialogOrchestrator:
 
         slot_suggestions = session_state.context.get("slot_suggestions") or []
         preselected_slot = None
+        reschedule_appointment_id = session_state.context.get("reschedule_appointment_id")
         if intent == "clarify" and slot_suggestions:
             preselected_slot = self._select_slot_from_reply(body, slot_suggestions, conversation.clinic.tz)
             if not preselected_slot and getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
@@ -305,7 +306,45 @@ class DialogOrchestrator:
                     response_text = AR_NO_AVAILABILITY if language == "ar" else "I'll review the calendar and follow up with options."
         elif intent in {"confirm", "cancel", "reschedule"}:
             self.fsm.apply(conversation, intent, context={"message": body, "is_off_topic": False})
-            if intent == "confirm" and getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
+            if intent in {"cancel", "reschedule"} and getattr(settings, "LLM_TOOL_CALLING_ENABLED", False):
+                try:
+                    tool_reply, tool_slots, tool_meta = self.llm_router.answer_with_tools(
+                        clinic=conversation.clinic,
+                        language=language,
+                        prompt=body,
+                        conversation_id=conversation.id,
+                    )
+                    if tool_reply:
+                        if tool_meta and tool_meta.get("action") == "reschedule" and tool_slots:
+                            session_state.context["slot_suggestions"] = [
+                                {
+                                    "start": slot.start.isoformat(),
+                                    "end": slot.end.isoformat(),
+                                    "tentative": slot.tentative,
+                                    "source": slot.source,
+                                }
+                                for slot in tool_slots
+                            ]
+                            session_state.context["slot_offer_prompt"] = tool_reply
+                            if tool_meta.get("service_code"):
+                                session_state.context["slot_service_code"] = tool_meta.get("service_code")
+                            if tool_meta.get("appointment_id"):
+                                session_state.context["reschedule_appointment_id"] = tool_meta.get("appointment_id")
+                            session_state.save(update_fields=["context", "updated_at"])
+                        response_text = tool_reply
+                        queue_session = True
+                    else:
+                        response_text = self._handle_terminal_intent(conversation, intent, language)
+                        queue_session = True
+                except LLMRouterError as exc:
+                    logger.warning("LLM tool call skipped: %s", exc)
+                    response_text = self._handle_terminal_intent(conversation, intent, language)
+                    queue_session = True
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error("LLM tool call error: %s", exc, exc_info=True)
+                    response_text = self._handle_terminal_intent(conversation, intent, language)
+                    queue_session = True
+            elif intent == "confirm" and getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
                 slot_suggestions = session_state.context.get("slot_suggestions") or []
                 service_code = session_state.context.get("slot_service_code")
                 selected = preselected_slot or self._select_slot_from_reply(body, slot_suggestions, conversation.clinic.tz)
@@ -324,7 +363,75 @@ class DialogOrchestrator:
                         logger.warning("LLM slot selection skipped: %s", exc)
                     except Exception as exc:  # pragma: no cover - defensive
                         logger.error("LLM slot selection error: %s", exc, exc_info=True)
-                if selected and service_code and conversation.patient:
+                if reschedule_appointment_id and selected and conversation.patient:
+                    try:
+                        from apps.appointments.models import Appointment
+
+                        appointment = Appointment.objects.filter(
+                            id=reschedule_appointment_id,
+                            clinic=conversation.clinic,
+                            patient=conversation.patient,
+                        ).first()
+                    except Exception:
+                        appointment = None
+                    try:
+                        start_local = datetime.fromisoformat(selected.get("start", ""))
+                    except (TypeError, ValueError):
+                        start_local = None
+                    if start_local and start_local.tzinfo is None:
+                        start_local = start_local.replace(tzinfo=ZoneInfo(conversation.clinic.tz or "UTC"))
+
+                    if appointment and start_local:
+                        appointment, error_code, tentative = reschedule_appointment(
+                            clinic=conversation.clinic,
+                            appointment=appointment,
+                            start_local=start_local,
+                        )
+                        if appointment:
+                            session_state.context.pop("slot_suggestions", None)
+                            session_state.context.pop("slot_service_code", None)
+                            session_state.context.pop("slot_offer_prompt", None)
+                            session_state.context.pop("reschedule_appointment_id", None)
+                            session_state.save(update_fields=["context", "updated_at"])
+                            time_label = start_local.astimezone(
+                                ZoneInfo(conversation.clinic.tz or "UTC")
+                            ).strftime("%A %d %b %I:%M %p")
+                            suffix = ""
+                            if tentative:
+                                suffix = AR_TENTATIVE_NOTE if language == "ar" else " (tentative hold)"
+                            if language == "ar":
+                                response_text = f"تم تعديل موعدك إلى {time_label}.{suffix}"
+                            else:
+                                response_text = f"Your appointment has been rescheduled to {time_label}.{suffix}"
+                            try:
+                                response_text = self.llm_router.compose_action_reply(
+                                    language=language,
+                                    action="reschedule",
+                                    time_label=time_label,
+                                    clinic_name=conversation.clinic.name,
+                                    conversation_id=conversation.id,
+                                )
+                            except LLMRouterError as exc:
+                                logger.warning("LLM action reply skipped: %s", exc)
+                            except Exception as exc:  # pragma: no cover - defensive
+                                logger.error("LLM action reply error: %s", exc, exc_info=True)
+                            queue_session = True
+                        else:
+                            error_text = "That time is no longer available. Please choose another time."
+                            if error_code == "OUT_OF_HOURS":
+                                error_text = "That time is outside our working hours. Please choose another time."
+                            if language == "ar":
+                                error_text = "الوقت غير متاح. فضلاً اختر وقتاً آخر."
+                            response_text = error_text
+                            queue_session = True
+                    else:
+                        response_text = (
+                            "Please choose one of the suggested times (e.g., 1 or 2)."
+                            if language != "ar"
+                            else "يرجى اختيار أحد الأوقات المقترحة (مثال: 1 أو 2)."
+                        )
+                        queue_session = True
+                elif selected and service_code and conversation.patient:
                     service = conversation.clinic.services.filter(code=service_code).first()
                     try:
                         start_local = datetime.fromisoformat(selected.get("start", ""))
