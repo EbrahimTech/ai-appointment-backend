@@ -215,6 +215,63 @@ class LLMRouter:
             return str(plan.get("reply") or ""), [], None
 
         tool_name = plan.get("tool")
+        if tool_name == "book_appointment":
+            if not getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
+                return None, [], None
+
+            tool_result = self._tool_book_appointment(
+                clinic=clinic,
+                conversation=conversation,
+                args=plan.get("args") or {},
+            )
+            appointment = tool_result.get("appointment")
+            if appointment:
+                start_local = tool_result.get("start_local")
+                time_label = None
+                if isinstance(start_local, datetime):
+                    tz = ZoneInfo(clinic.tz or "UTC")
+                    time_label = start_local.astimezone(tz).strftime("%A %d %b %I:%M %p")
+                reply = (
+                    f"Your appointment is booked for {time_label}."
+                    if time_label
+                    else "Your appointment is booked."
+                )
+                try:
+                    reply = self.compose_action_reply(
+                        language=language,
+                        action="confirm",
+                        time_label=time_label,
+                        clinic_name=clinic.name,
+                        conversation_id=conversation_id,
+                    )
+                except LLMRouterError as exc:
+                    logger.warning("LLM action reply skipped: %s", exc)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error("LLM action reply error: %s", exc, exc_info=True)
+                return reply, [], {
+                    "action": "booked",
+                    "appointment_id": appointment.id,
+                    "service_code": tool_result.get("service_code"),
+                }
+
+            slots = tool_result.get("slots") or []
+            if slots:
+                reply = self._finalize_tool_reply(language, prompt, slots)
+                return reply, slots, {"service_code": tool_result.get("service_code")}
+
+            error = tool_result.get("error")
+            if error == "missing_service":
+                return "Which service would you like to book?", [], None
+            if error == "missing_time":
+                return "What time works for you?", [], None
+            if error == "OUT_OF_HOURS":
+                return "That time is outside our working hours. Please choose another time.", [], None
+            if error == "SLOT_TAKEN":
+                return "That time is no longer available. Please choose another time.", [], None
+            if error == "missing_patient":
+                return "I need your details before I can book. Please share your name.", [], None
+            return "I could not book that time. Please choose another time.", [], None
+
         if tool_name != "get_available_slots":
             return str(plan.get("reply") or ""), [], None
 
@@ -364,13 +421,18 @@ class LLMRouter:
     def _plan_tool_call(self, *, clinic: Clinic, language: str, prompt: str) -> dict | None:
         services = list(clinic.services.filter(is_active=True).order_by("name")[:20])
         service_list = "\n".join([f"- {svc.code}: {svc.name}" for svc in services]) or "No services"
+        tz = clinic.tz or "UTC"
+        now_local = timezone.now().astimezone(ZoneInfo(tz))
 
         system = (
             "You are a dental clinic assistant. "
-            "Decide if you should call a tool to fetch appointment availability. "
+            "Decide if you should call a tool. "
             "If the user asks about available times, return JSON with a tool call: "
             '{"tool":"get_available_slots","args":{"service_code":"...", "from_iso":"", "to_iso":"", "limit":3}}. '
-            "Use a service_code from the list. "
+            "If the user provides a specific date/time and wants to book, return: "
+            '{"tool":"book_appointment","args":{"service_code":"...", "start_iso":"YYYY-MM-DDTHH:MM:SS+TZ"}}. '
+            "Use a service_code from the list (or the only service if there is one). "
+            "Use the clinic timezone when producing start_iso. "
             "If you need clarification, return JSON with a reply: "
             '{"reply":"..."} in the requested language. '
             "Return only JSON, no extra text."
@@ -379,7 +441,10 @@ class LLMRouter:
             {"role": "system", "content": system},
             {
                 "role": "user",
-                "content": f"Services:\n{service_list}\n\nUser: {prompt}\nLanguage: {language}",
+                "content": (
+                    f"Clinic time now: {now_local.isoformat()} ({tz})\n"
+                    f"Services:\n{service_list}\n\nUser: {prompt}\nLanguage: {language}"
+                ),
             },
         ]
 
@@ -423,6 +488,71 @@ class LLMRouter:
             limit=limit,
         )
         return {"slots": slots, "tz": clinic.tz or "UTC", "service_code": service_code}
+
+    def _tool_book_appointment(
+        self,
+        *,
+        clinic: Clinic,
+        conversation: Conversation | None,
+        args: dict,
+    ) -> dict:
+        service_code = str(args.get("service_code", "")).strip()
+        service = None
+        if service_code:
+            service = clinic.services.filter(code=service_code, is_active=True).first()
+        if not service:
+            services = list(clinic.services.filter(is_active=True).order_by("duration_minutes")[:2])
+            if len(services) == 1:
+                service = services[0]
+                service_code = service.code
+        if not service:
+            return {"error": "missing_service"}
+
+        tzinfo = ZoneInfo(clinic.tz or "UTC")
+        start_local = self._parse_tool_datetime(args.get("start_iso"), tzinfo)
+        if not start_local:
+            return {"error": "missing_time", "service_code": service_code}
+        if start_local.tzinfo is None:
+            start_local = start_local.replace(tzinfo=tzinfo)
+
+        patient = conversation.patient if conversation else None
+        if not patient:
+            return {"error": "missing_patient"}
+
+        from apps.accounts.views import book_appointment
+
+        appointment, error_code, tentative = book_appointment(
+            clinic=clinic,
+            patient=patient,
+            service=service,
+            start_local=start_local,
+            source="assistant",
+        )
+        if appointment:
+            return {
+                "appointment": appointment,
+                "tentative": tentative,
+                "start_local": start_local,
+                "service_code": service_code,
+            }
+
+        slots = []
+        if error_code in {"SLOT_TAKEN", "OUT_OF_HOURS"}:
+            start_window = start_local
+            end_window = start_local + timedelta(days=7)
+            slots = find_available_slots(
+                clinic,
+                service,
+                start=start_window,
+                end=end_window,
+                limit=3,
+            )
+
+        return {
+            "error": error_code or "BOOKING_FAILED",
+            "slots": slots,
+            "service_code": service_code,
+        }
 
     def _finalize_tool_reply(self, language: str, prompt: str, slots: list[SuggestedSlot]) -> str:
         lang = (language or "en").lower()

@@ -249,7 +249,12 @@ class DialogOrchestrator:
                         conversation_id=conversation.id,
                     )
                     if tool_reply:
-                        if tool_slots:
+                        if tool_meta and tool_meta.get("action") == "booked":
+                            session_state.context.pop("slot_suggestions", None)
+                            session_state.context.pop("slot_service_code", None)
+                            session_state.context.pop("slot_offer_prompt", None)
+                            session_state.save(update_fields=["context", "updated_at"])
+                        elif tool_slots:
                             session_state.context["slot_suggestions"] = [
                                 {
                                     "start": slot.start.isoformat(),
