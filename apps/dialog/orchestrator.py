@@ -1059,9 +1059,34 @@ class DialogOrchestrator:
             "actions": actions,
         }
 
+    def _record_action_decision(
+        self,
+        session_state: SessionState,
+        *,
+        intent: str,
+        state: str,
+        slots: dict,
+        missing: list[str],
+        prompt: str,
+        actions: list[str],
+    ) -> None:
+        session_state.context["decision"] = {
+            "intent": intent,
+            "state": state,
+            "slots": slots,
+            "missing_slots": missing,
+            "next_question": prompt,
+            "actions": actions,
+        }
+
     def _clear_booking_flow(self, session_state: SessionState) -> None:
         session_state.context.pop("booking_flow", None)
         session_state.context.pop("decision", None)
+
+    def _clear_action_flow(self, session_state: SessionState) -> None:
+        session_state.context.pop("action_flow", None)
+        if session_state.context.get("decision", {}).get("intent") in {"cancel", "reschedule"}:
+            session_state.context.pop("decision", None)
 
     def _detect_booking_reason(self, text: str, language: str) -> str | None:
         lowered = text.lower()
@@ -1535,6 +1560,77 @@ class DialogOrchestrator:
         if getattr(appointment, "service", None) and appointment.service:
             service_label = appointment.service.name
         return start_label, service_label
+
+    def _format_appointment_choices(self, *, appointments: list, clinic_tz: str, language: str) -> str:
+        tz = ZoneInfo(clinic_tz or "UTC")
+        lines: list[str] = []
+        for idx, appointment in enumerate(appointments, start=1):
+            start_label = "unknown time"
+            if getattr(appointment, "start_at", None):
+                start_label = appointment.start_at.astimezone(tz).strftime("%A %d %b %I:%M %p")
+            service_label = "service"
+            if getattr(appointment, "service", None) and appointment.service:
+                service_label = appointment.service.name
+            if language == "ar":
+                lines.append(f"{idx}) {service_label} - {start_label}")
+            else:
+                lines.append(f"{idx}) {start_label} — {service_label}")
+
+        if language == "ar":
+            intro = "لديك أكثر من موعد قادم. اختر رقم الموعد:"
+            outro = "أرسل رقمًا واحدًا فقط (مثال: 1 أو 2)."
+        else:
+            intro = "You have multiple upcoming appointments. Please choose one:"
+            outro = "Reply with a single number (e.g., 1 or 2)."
+
+        return "\n".join([intro, *lines, outro])
+
+    def _extract_choice_index(self, text: str, max_value: int) -> int | None:
+        if not text or max_value < 1:
+            return None
+        normalized = self._normalize_digits(text)
+        match = re.search(r"\b(\d{1,2})\b", normalized)
+        if not match:
+            return None
+        try:
+            value = int(match.group(1))
+        except ValueError:
+            return None
+        if 1 <= value <= max_value:
+            return value
+        return None
+
+    def _list_upcoming_appointments(self, conversation: Conversation, limit: int = 3):
+        from apps.appointments.models import Appointment, AppointmentStatus
+
+        now = timezone.now()
+        return list(
+            Appointment.objects.filter(
+                clinic=conversation.clinic,
+                patient=conversation.patient,
+                status__in=[
+                    AppointmentStatus.PENDING,
+                    AppointmentStatus.BOOKED,
+                    AppointmentStatus.CONFIRMED,
+                ],
+                slot__lower__gte=now,
+            )
+            .order_by("slot__lower")[:limit]
+        )
+
+    def _resolve_upcoming_appointment(self, conversation: Conversation, appointment_id: int):
+        from apps.appointments.models import Appointment, AppointmentStatus
+
+        return Appointment.objects.filter(
+            id=appointment_id,
+            clinic=conversation.clinic,
+            patient=conversation.patient,
+            status__in=[
+                AppointmentStatus.PENDING,
+                AppointmentStatus.BOOKED,
+                AppointmentStatus.CONFIRMED,
+            ],
+        ).order_by("slot__lower").first()
 
     def _is_affirmative_reply(self, normalized: str, raw: str) -> bool:
         tokens = {"yes", "y", "ok", "okay", "confirm", "sure", "agree"}
