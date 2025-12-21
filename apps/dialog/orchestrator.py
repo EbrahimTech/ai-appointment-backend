@@ -98,8 +98,7 @@ class DialogOrchestrator:
                 suppress_duplicate = True
 
         if suppress_duplicate and (
-            intent in {"cancel", "reschedule"}
-            or session_state.context.get("slot_suggestions")
+            session_state.context.get("slot_suggestions")
             or session_state.context.get("action_flow")
             or session_state.context.get("pending_action")
         ):
