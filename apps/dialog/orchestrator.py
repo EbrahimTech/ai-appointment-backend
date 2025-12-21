@@ -254,6 +254,7 @@ class DialogOrchestrator:
                             session_state.context.pop("slot_suggestions", None)
                             session_state.context.pop("slot_service_code", None)
                             session_state.context.pop("slot_offer_prompt", None)
+                            session_state.context.pop("reschedule_appointment_id", None)
                             session_state.save(update_fields=["context", "updated_at"])
                         elif tool_slots:
                             session_state.context["slot_suggestions"] = [
