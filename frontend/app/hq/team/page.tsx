@@ -22,7 +22,7 @@ type StaffMember = {
   id: number;
   email: string;
   name: string;
-  role: "SUPERADMIN" | "OPS" | "SUPPORT" | "SALES";
+  role: "SUPERADMIN" | "OPS";
   is_active: boolean;
   last_login: string | null;
   created_at: string;
@@ -43,8 +43,6 @@ const updateSchema = z.object({
 const ROLE_LABELS: Record<StaffMember["role"], string> = {
   SUPERADMIN: "Super Admin",
   OPS: "Ops",
-  SUPPORT: "Support (legacy)",
-  SALES: "Sales (legacy)",
 };
 
 export default function HQTeamPage() {
@@ -417,7 +415,7 @@ export default function HQTeamPage() {
                       <Cell>
                         {selectedId === member.id ? (
                           <select
-                            defaultValue={member.role === "SUPERADMIN" || member.role === "OPS" ? member.role : "OPS"}
+                            defaultValue={member.role}
                             onChange={(event) =>
                               updateMutation.mutate({
                                 id: member.id,
