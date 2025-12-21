@@ -115,11 +115,14 @@ class LLMRouter:
         if snapshot:
             context_text = snapshot + "\n\n" + context_text
 
-        if not grounded_chunks and not snapshot:
-            self._register_not_understood(session_state, conversation)
-            raise LLMRouterError("rag_context_missing")
+        has_context = bool(grounded_chunks or snapshot)
+        if not has_context:
+            allow_fallback = getattr(settings, "LLM_ALLOW_GENERAL_FALLBACK", True)
+            if not allow_fallback:
+                self._register_not_understood(session_state, conversation)
+                raise LLMRouterError("rag_context_missing")
 
-        guardrails = self._system_prompt()
+        guardrails = self._system_prompt() if has_context else self._general_system_prompt()
         messages = [
             {"role": "system", "content": guardrails},
             {
@@ -127,6 +130,13 @@ class LLMRouter:
                 "content": (
                     f"Context:\n{context_text}\n\nQuestion:\n{prompt}\n\n"
                     f"Answer in {language.upper()}"
+                    if has_context
+                    else (
+                        f"Clinic: {clinic.name}\n"
+                        f"Timezone: {clinic.tz or 'UTC'}\n"
+                        f"User: {prompt}\n"
+                        f"Language: {language}"
+                    )
                 ),
             },
         ]
@@ -138,7 +148,7 @@ class LLMRouter:
                 json={
                     "model": self.model,
                     "messages": messages,
-                    "temperature": 0.1,
+                    "temperature": 0.2,
                 },
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
