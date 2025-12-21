@@ -77,22 +77,10 @@ export default function ConversationDetailPage() {
       }
       return payload.data as ConversationDetail;
     },
-    refetchInterval: (query) => {
-      const data = query.state.data as ConversationDetail | undefined;
-      const messages = data?.messages ?? [];
-      if (!messages.length) {
-        return false;
-      }
-      const lastTs = messages.reduce((latest, msg) => {
-        const current = new Date(msg.ts).getTime();
-        return current > latest ? current : latest;
-      }, 0);
-      const ageMs = Date.now() - lastTs;
-      return ageMs <= 60_000 ? 1000 : 3000;
-    },
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
   });
+  const refetchConversation = conversationQuery.refetch;
 
   const templatesQuery = useQuery({
     queryKey: ["templates", slug, lang],
@@ -117,6 +105,64 @@ export default function ConversationDetailPage() {
       setLang(conversationQuery.data.lang);
     }
   }, [conversationQuery.data?.lang]);
+
+  useEffect(() => {
+    if (!slug || !conversationId) {
+      return;
+    }
+
+    let isActive = true;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
+    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000").replace(/\/$/, "");
+    const wsBase = backendUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+    const wsUrl = `${wsBase}/ws/clinic/${slug}/conversations/${conversationId}/`;
+
+    const connect = () => {
+      if (!isActive) {
+        return;
+      }
+      socket = new WebSocket(wsUrl);
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.type === "message") {
+            refetchConversation();
+          }
+        } catch {
+          // Ignore malformed payloads.
+        }
+      };
+
+      socket.onclose = () => {
+        if (!isActive) {
+          return;
+        }
+        const delay = Math.min(10_000, 1_000 * Math.pow(2, attempt));
+        attempt += 1;
+        reconnectTimer = setTimeout(connect, delay);
+      };
+
+      socket.onerror = () => {
+        socket?.close();
+      };
+    };
+
+    connect();
+
+    return () => {
+      isActive = false;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      if (socket && socket.readyState < WebSocket.CLOSING) {
+        socket.close();
+      }
+    };
+  }, [slug, conversationId, refetchConversation]);
 
   useEffect(() => {
     if (templatesQuery.data?.length && !templateKey) {

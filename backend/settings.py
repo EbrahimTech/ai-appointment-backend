@@ -115,6 +115,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "backend.wsgi.application"
+ASGI_APPLICATION = "backend.asgi.application"
 
 
 # Database
@@ -245,6 +246,14 @@ SIMPLE_JWT = {
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_SWEEP_TENTATIVE_SECONDS = int(os.getenv("CELERY_SWEEP_TENTATIVE_SECONDS", "600"))
+
+CHANNEL_LAYER_REDIS_URL = os.getenv("CHANNEL_LAYER_REDIS_URL", CELERY_BROKER_URL)
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [CHANNEL_LAYER_REDIS_URL]},
+    }
+}
 
 CELERY_BEAT_SCHEDULE = {
     "sweep-tentative-google-syncs": {
