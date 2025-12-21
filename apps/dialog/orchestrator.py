@@ -572,9 +572,10 @@ class DialogOrchestrator:
                             session_state.context.pop("slot_offer_prompt", None)
                             session_state.context.pop("reschedule_appointment_id", None)
                             session_state.save(update_fields=["context", "updated_at"])
-                            time_label = start_local.astimezone(
-                                ZoneInfo(conversation.clinic.tz or "UTC")
-                            ).strftime("%A %d %b %I:%M %p")
+                            time_label = self._format_datetime_label(
+                                start_local.astimezone(ZoneInfo(conversation.clinic.tz or "UTC")),
+                                language,
+                            )
                             suffix = ""
                             if tentative:
                                 suffix = AR_TENTATIVE_NOTE if language == "ar" else " (tentative hold)"
@@ -637,9 +638,10 @@ class DialogOrchestrator:
                             session_state.context.pop("slot_offer_prompt", None)
                             self._clear_booking_flow(session_state)
                             session_state.save(update_fields=["context", "updated_at"])
-                            time_label = start_local.astimezone(
-                                ZoneInfo(conversation.clinic.tz or "UTC")
-                            ).strftime("%A %d %b %I:%M %p")
+                            time_label = self._format_datetime_label(
+                                start_local.astimezone(ZoneInfo(conversation.clinic.tz or "UTC")),
+                                language,
+                            )
                             suffix = ""
                             if tentative:
                                 suffix = AR_TENTATIVE_NOTE if language == "ar" else " (tentative hold)"
@@ -764,8 +766,8 @@ class DialogOrchestrator:
                     logger.warning("Failed to create handoff notification: %s", err)
             return AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
 
-		clinic = conversation.clinic
-		services = self._get_services_for_language(clinic, language)
+        clinic = conversation.clinic
+        services = self._get_services_for_language(clinic, language)
         if not services:
             self._clear_booking_flow(session_state)
             return "لا توجد خدمات متاحة حالياً." if language == "ar" else "No services are available right now."
@@ -1154,10 +1156,37 @@ class DialogOrchestrator:
         return "What is the visit reason? (referral/cosmetic/pain/checkup/other)"
 
     def _format_service_prompt(self, language: str, services: list) -> str:
-        names = ", ".join([svc.name for svc in services[:4]]) or "service"
+        names = ", ".join([svc.name for svc in services[:4] if svc.name])
         if language == "ar":
-            return f"ما الخدمة المطلوبة؟ (مثال: {names})"
-        return f"Which service would you like? (e.g., {names})"
+            if names and any(ch.isascii() and ch.isalpha() for ch in names):
+                return "?? ?????? ?????????"
+            if names:
+                return f"?? ?????? ????????? (????: {names})"
+            return "?? ?????? ?????????"
+        if names:
+            return f"Which service would you like? (e.g., {names})"
+        return "Which service would you like?"
+
+
+    def _get_services_for_language(self, clinic: Clinic, language: str) -> list:
+        services = list(clinic.services.filter(is_active=True))
+        if not services:
+            return []
+
+        lang = (language or "").lower()
+        preferred_langs = {lang}
+        if lang.startswith("en"):
+            preferred_langs = {"en", "en_us"}
+        elif lang.startswith("ar"):
+            preferred_langs = {"ar"}
+
+        preferred = [svc for svc in services if getattr(svc, "language", "") in preferred_langs]
+        by_code: dict[str, object] = {}
+        for svc in preferred:
+            by_code.setdefault(svc.code, svc)
+        for svc in services:
+            by_code.setdefault(svc.code, svc)
+        return sorted(by_code.values(), key=lambda svc: (svc.name or ""))
 
     def _format_date_prompt(self, language: str) -> str:
         if language == "ar":
@@ -1290,7 +1319,7 @@ class DialogOrchestrator:
         formatted: list[str] = []
         for slot in slots[:2]:
             local_start = slot.start.astimezone(tz)
-            label = local_start.strftime("%A %d %b %I:%M %p")
+            label = self._format_datetime_label(local_start, language)
             if slot.tentative:
                 label += AR_TENTATIVE_NOTE if language == "ar" else " (tentative hold)"
             formatted.append(label)
@@ -1662,15 +1691,18 @@ class DialogOrchestrator:
 
     def _format_service_label(self, service, clinic: Clinic | None, language: str) -> str:
         if not service:
-            return "الخدمة" if language == "ar" else "service"
+            return "??????" if language == "ar" else "service"
         if language == "ar" and clinic:
             if getattr(service, "language", None) != "ar":
                 translated = clinic.services.filter(code=service.code, language="ar").first()
                 if translated and translated.name:
                     return translated.name
-        return service.name or ("الخدمة" if language == "ar" else "service")
+        label = service.name or ""
+        if language == "ar" and any(ch.isascii() and ch.isalpha() for ch in label):
+            return "??????"
+        return label or ("??????" if language == "ar" else "service")
 
-    def _format_appointment_label(
+def _format_appointment_label(
         self, appointment, clinic_tz: str, language: str
     ) -> tuple[str, str]:
         tz = ZoneInfo(clinic_tz or "UTC")
@@ -1692,25 +1724,30 @@ class DialogOrchestrator:
         for idx, appointment in enumerate(appointments, start=1):
             start_label = "unknown time"
             if getattr(appointment, "start_at", None):
-                start_label = appointment.start_at.astimezone(tz).strftime("%A %d %b %I:%M %p")
-            service_label = "service"
-            if getattr(appointment, "service", None) and appointment.service:
-                service_label = appointment.service.name
+                start_label = self._format_datetime_label(
+                    appointment.start_at.astimezone(tz), language
+                )
+            service_label = self._format_service_label(
+                appointment.service if getattr(appointment, "service", None) else None,
+                appointment.clinic if getattr(appointment, "clinic", None) else None,
+                language,
+            )
             if language == "ar":
                 lines.append(f"{idx}) {service_label} - {start_label}")
             else:
-                lines.append(f"{idx}) {start_label} — {service_label}")
+                lines.append(f"{idx}) {start_label} ? {service_label}")
 
         if language == "ar":
-            intro = "لديك أكثر من موعد قادم. اختر رقم الموعد:"
-            outro = "أرسل رقمًا واحدًا فقط (مثال: 1 أو 2)."
+            intro = "???? ???? ?? ???? ????. ???? ??? ??????:"
+            outro = "???? ????? ?????? ??? (????: 1 ?? 2)."
         else:
             intro = "You have multiple upcoming appointments. Please choose one:"
             outro = "Reply with a single number (e.g., 1 or 2)."
 
-        return "\n".join([intro, *lines, outro])
+        return "
+".join([intro, *lines, outro])
 
-    def _extract_choice_index(self, text: str, max_value: int) -> int | None:
+def _extract_choice_index(self, text: str, max_value: int) -> int | None:
         if not text or max_value < 1:
             return None
         normalized = self._normalize_digits(text)

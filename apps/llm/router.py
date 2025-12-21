@@ -288,7 +288,7 @@ class LLMRouter:
                 time_label = None
                 if isinstance(start_local, datetime):
                     tz = ZoneInfo(clinic.tz or "UTC")
-                    time_label = start_local.astimezone(tz).strftime("%A %d %b %I:%M %p")
+                    time_label = self._format_datetime_label(start_local.astimezone(tz), language)
                 reply = (
                     f"Your appointment is booked for {time_label}."
                     if time_label
@@ -357,7 +357,7 @@ class LLMRouter:
                 time_label = None
                 if appointment.start_at:
                     tz = ZoneInfo(clinic.tz or "UTC")
-                    time_label = appointment.start_at.astimezone(tz).strftime("%A %d %b %I:%M %p")
+                    time_label = self._format_datetime_label(appointment.start_at.astimezone(tz), language)
                 reply = (
                     f"Your appointment for {time_label} has been cancelled."
                     if time_label
@@ -410,7 +410,7 @@ class LLMRouter:
                 time_label = None
                 if isinstance(start_local, datetime):
                     tz = ZoneInfo(clinic.tz or "UTC")
-                    time_label = start_local.astimezone(tz).strftime("%A %d %b %I:%M %p")
+                    time_label = self._format_datetime_label(start_local.astimezone(tz), language)
                 reply = (
                     f"Your appointment has been rescheduled to {time_label}."
                     if time_label
@@ -1058,6 +1058,44 @@ class LLMRouter:
             return dt.replace(tzinfo=ZoneInfo(tz))
         return dt.astimezone(ZoneInfo(tz))
 
+
+    def _format_datetime_label(self, dt: datetime, language: str) -> str:
+        lang = (language or "").lower()
+        if not lang.startswith("ar"):
+            return dt.strftime("%A %d %b %I:%M %p")
+
+        day_names = [
+            "???????",
+            "????????",
+            "????????",
+            "??????",
+            "??????",
+            "?????",
+            "?????",
+        ]
+        month_names = [
+            "?????",
+            "??????",
+            "????",
+            "?????",
+            "????",
+            "?????",
+            "?????",
+            "?????",
+            "??????",
+            "??????",
+            "??????",
+            "??????",
+        ]
+        day_name = day_names[dt.weekday()]
+        month_name = month_names[dt.month - 1]
+        hour = dt.hour
+        period = "??????" if hour < 12 else "?????"
+        hour12 = hour % 12
+        if hour12 == 0:
+            hour12 = 12
+        return f"{day_name} {dt.day} {month_name} {hour12}:{dt.minute:02d} {period}"
+
     def _finalize_tool_reply(self, language: str, prompt: str, slots: list[SuggestedSlot]) -> str:
         lang = (language or "en").lower()
         if not slots:
@@ -1066,7 +1104,7 @@ class LLMRouter:
         tentative_note = " (حجز مبدئي)" if lang == "ar" else " (tentative hold)"
         lines: list[str] = []
         for idx, slot in enumerate(slots[:3], start=1):
-            label = slot.start.strftime("%A %d %b %I:%M %p")
+            label = self._format_datetime_label(slot.start, language)
             if slot.tentative:
                 label += tentative_note
             lines.append(f"{idx}) {label}")
