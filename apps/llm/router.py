@@ -229,6 +229,8 @@ class LLMRouter:
                 clinic=clinic,
                 conversation=conversation,
                 args=plan.get("args") or {},
+                language=language,
+                prompt=prompt,
             )
             appointment = tool_result.get("appointment")
             if appointment:
@@ -285,6 +287,8 @@ class LLMRouter:
                 clinic=clinic,
                 conversation=conversation,
                 args=plan.get("args") or {},
+                language=language,
+                prompt=prompt,
             )
             appointment = tool_result.get("appointment")
             if appointment:
@@ -327,6 +331,8 @@ class LLMRouter:
                 clinic=clinic,
                 conversation=conversation,
                 args=plan.get("args") or {},
+                language=language,
+                prompt=prompt,
             )
             appointment = tool_result.get("appointment")
             if appointment:
@@ -628,6 +634,8 @@ class LLMRouter:
         clinic: Clinic,
         conversation: Conversation | None,
         args: dict,
+        language: str,
+        prompt: str,
     ) -> dict:
         service_code = str(args.get("service_code", "")).strip()
         service = None
@@ -643,6 +651,13 @@ class LLMRouter:
 
         tzinfo = ZoneInfo(clinic.tz or "UTC")
         start_local = self._parse_tool_datetime(args.get("start_iso"), tzinfo)
+        if not start_local:
+            start_local = self._interpret_time_text(
+                clinic=clinic,
+                language=language,
+                prompt=prompt,
+                purpose="book",
+            )
         if not start_local:
             return {"error": "missing_time", "service_code": service_code}
         if start_local.tzinfo is None:
@@ -693,16 +708,29 @@ class LLMRouter:
         clinic: Clinic,
         conversation: Conversation | None,
         args: dict,
+        language: str,
+        prompt: str,
     ) -> dict:
         patient = conversation.patient if conversation else None
         if not patient:
             return {"error": "missing_patient"}
 
+        start_iso = args.get("start_iso")
+        if not start_iso:
+            parsed = self._interpret_time_text(
+                clinic=clinic,
+                language=language,
+                prompt=prompt,
+                purpose="cancel",
+            )
+            if parsed:
+                start_iso = parsed.isoformat()
+
         appointment = self._resolve_appointment(
             clinic=clinic,
             patient=patient,
             appointment_id=args.get("appointment_id"),
-            start_iso=args.get("start_iso"),
+            start_iso=start_iso,
         )
         if not appointment:
             if self._list_upcoming_appointments(clinic, patient, limit=1):
@@ -720,16 +748,29 @@ class LLMRouter:
         clinic: Clinic,
         conversation: Conversation | None,
         args: dict,
+        language: str,
+        prompt: str,
     ) -> dict:
         patient = conversation.patient if conversation else None
         if not patient:
             return {"error": "missing_patient"}
 
+        start_iso = args.get("start_iso")
+        if not start_iso:
+            parsed = self._interpret_time_text(
+                clinic=clinic,
+                language=language,
+                prompt=prompt,
+                purpose="reschedule",
+            )
+            if parsed:
+                start_iso = parsed.isoformat()
+
         appointment = self._resolve_appointment(
             clinic=clinic,
             patient=patient,
             appointment_id=args.get("appointment_id"),
-            start_iso=args.get("start_iso"),
+            start_iso=start_iso,
         )
         if not appointment:
             if self._list_upcoming_appointments(clinic, patient, limit=1):
@@ -739,6 +780,13 @@ class LLMRouter:
         start_iso = args.get("new_start_iso") or args.get("start_iso")
         tzinfo = ZoneInfo(clinic.tz or "UTC")
         start_local = self._parse_tool_datetime(start_iso, tzinfo) if start_iso else None
+        if not start_local:
+            start_local = self._interpret_time_text(
+                clinic=clinic,
+                language=language,
+                prompt=prompt,
+                purpose="reschedule",
+            )
         if not start_local:
             service = appointment.service
             if not service:
@@ -846,7 +894,66 @@ class LLMRouter:
             if closest:
                 return closest
 
-        return qs.order_by("slot__lower").first()
+        if not start_local:
+            upcoming = list(qs.order_by("slot__lower")[:2])
+            if len(upcoming) == 1:
+                return upcoming[0]
+            return None
+
+        return None
+
+    def _interpret_time_text(
+        self,
+        *,
+        clinic: Clinic,
+        language: str,
+        prompt: str,
+        purpose: str,
+    ) -> datetime | None:
+        if not prompt or not self.api_key:
+            return None
+        if not self._budget_available():
+            return None
+        tz = clinic.tz or "UTC"
+        now_local = timezone.now().astimezone(ZoneInfo(tz))
+        system = (
+            "You are a scheduling assistant. "
+            "Extract the requested time from the user's message. "
+            "If the user is rescheduling, extract the NEW requested time (ignore the old time). "
+            "Return only JSON: {\"start_iso\":\"YYYY-MM-DDTHH:MM:SS+TZ\"} or {\"start_iso\": null}. "
+            "Use the clinic timezone shown. If the time is ambiguous, choose the nearest reasonable time within 30 days."
+        )
+        user = (
+            f"Purpose: {purpose}\n"
+            f"Clinic time now: {now_local.isoformat()} ({tz})\n"
+            f"User message: {prompt}\n"
+            f"Language: {language}"
+        )
+        content = self._send_llm_request(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            prompt=prompt,
+            model=getattr(settings, "LLM_TIME_PARSER_MODEL", self.model),
+            max_tokens=120,
+            temperature=0,
+        )
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            logger.warning("Time parse failed: %s", content)
+            return None
+        start_iso = parsed.get("start_iso")
+        if not start_iso:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(start_iso))
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=ZoneInfo(tz))
+        return dt.astimezone(ZoneInfo(tz))
 
     def _finalize_tool_reply(self, language: str, prompt: str, slots: list[SuggestedSlot]) -> str:
         lang = (language or "en").lower()
