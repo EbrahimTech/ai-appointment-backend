@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Tuple
 
 from django.conf import settings
@@ -202,6 +202,40 @@ class DialogOrchestrator:
                     logger.error("LLM slot selection error: %s", exc, exc_info=True)
             if preselected_slot:
                 intent = "confirm"
+
+        booking_flow = session_state.context.get("booking_flow") or {}
+        if (
+            intent == "book"
+            or (
+                booking_flow
+                and booking_flow.get("state") not in {"BOOKED", "DONE"}
+                and intent not in {"confirm", "cancel", "reschedule"}
+            )
+        ):
+            response_text = self._handle_booking_flow(
+                conversation=conversation,
+                session_state=session_state,
+                body=body,
+                language=language,
+                intent=intent,
+            )
+            if response_text:
+                ConversationMessage.objects.create(
+                    conversation=conversation,
+                    direction="outbound",
+                    language=language,
+                    body=response_text,
+                    intent="book",
+                    metadata={"auto_reply": True, "flow": "booking"},
+                )
+                enqueue_whatsapp_session_message(
+                    clinic_id=conversation.clinic_id,
+                    conversation=conversation,
+                    language=language,
+                    message_body=response_text,
+                    idempotency_key=f"booking:{conversation.id}:{inbound_message.id}",
+                )
+                return response_text, "book"
 
         # Track repeated unproductive intents to auto-handoff
         productive_intents = {"book", "confirm", "cancel", "reschedule"}
