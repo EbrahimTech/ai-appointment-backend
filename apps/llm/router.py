@@ -626,7 +626,12 @@ class LLMRouter:
         conversation: Conversation | None,
     ) -> dict | None:
         services = list(clinic.services.filter(is_active=True).order_by("name")[:20])
-        service_list = "\n".join([f"- {svc.code}: {svc.name}" for svc in services]) or "No services"
+        service_list = "\n".join(
+            [
+                f"- {svc.code}: {self._service_display_name(clinic, svc, language)}"
+                for svc in services
+            ]
+        ) or "No services"
         tz = clinic.tz or "UTC"
         now_local = timezone.now().astimezone(ZoneInfo(tz))
         upcoming_text = "No upcoming appointments"
