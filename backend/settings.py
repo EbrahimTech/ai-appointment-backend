@@ -264,6 +264,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.workers.tasks.dispatch_outbox_messages",
         "schedule": timedelta(seconds=10),  # Run every 10 seconds
     },
+    "appointment-reminders": {
+        "task": "apps.workers.tasks.schedule_appointment_reminders",
+        "schedule": timedelta(minutes=15),
+    },
 }
 
 SUPPORT_SESSION_MINUTES = int(os.getenv("SUPPORT_SESSION_MINUTES", "15"))
