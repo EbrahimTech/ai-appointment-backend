@@ -47,7 +47,15 @@ def detect_intent(text: str) -> str:
         "policy": {"policy", "سياسة", "سياسات", "شروط"},
     }
 
+    priority_intents = ["cancel", "reschedule"]
+    for intent in priority_intents:
+        vocab = keywords.get(intent, set())
+        if any(token in text for token in vocab):
+            return intent
+
     for intent, vocab in keywords.items():
+        if intent in {"cancel", "reschedule"}:
+            continue
         if any(token in text for token in vocab):
             return intent
 
