@@ -148,7 +148,10 @@ class DialogOrchestrator:
         slot_suggestions = session_state.context.get("slot_suggestions") or []
         preselected_slot = None
         reschedule_appointment_id = session_state.context.get("reschedule_appointment_id")
-        if intent == "clarify" and slot_suggestions:
+        should_attempt_slot_selection = bool(slot_suggestions) and intent != "cancel"
+        if intent == "reschedule" and not reschedule_appointment_id:
+            should_attempt_slot_selection = False
+        if should_attempt_slot_selection:
             preselected_slot = self._select_slot_from_reply(body, slot_suggestions, conversation.clinic.tz)
             if not preselected_slot and getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
                 try:
