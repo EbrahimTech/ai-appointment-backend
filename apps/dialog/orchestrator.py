@@ -181,6 +181,52 @@ class DialogOrchestrator:
             )
             return response_text, "greet"
 
+        if intent == "clarify" and self._is_gratitude(normalized):
+            response_text = (
+                "العفو! إذا احتجت أي شيء آخر أخبرني."
+                if language == "ar"
+                else "You're welcome! Let me know if you need anything else."
+            )
+            ConversationMessage.objects.create(
+                conversation=conversation,
+                direction="outbound",
+                language=language,
+                body=response_text,
+                intent="clarify",
+                metadata={"auto_reply": True, "reason": "gratitude"},
+            )
+            enqueue_whatsapp_session_message(
+                clinic_id=conversation.clinic_id,
+                conversation=conversation,
+                language=language,
+                message_body=response_text,
+                idempotency_key=f"gratitude:{conversation.id}:{inbound_message.id}",
+            )
+            return response_text, "clarify"
+
+        if intent == "book" and self._is_booking_complaint(normalized):
+            response_text = (
+                "هل ترغب بحجز موعد الآن؟"
+                if language == "ar"
+                else "Would you like to book an appointment now?"
+            )
+            ConversationMessage.objects.create(
+                conversation=conversation,
+                direction="outbound",
+                language=language,
+                body=response_text,
+                intent="clarify",
+                metadata={"auto_reply": True, "reason": "booking_complaint"},
+            )
+            enqueue_whatsapp_session_message(
+                clinic_id=conversation.clinic_id,
+                conversation=conversation,
+                language=language,
+                message_body=response_text,
+                idempotency_key=f"booking-clarify:{conversation.id}:{inbound_message.id}",
+            )
+            return response_text, "clarify"
+
         slot_suggestions = session_state.context.get("slot_suggestions") or []
         preselected_slot = None
         reschedule_appointment_id = session_state.context.get("reschedule_appointment_id")
