@@ -33,6 +33,7 @@ export default function HQLayout({ children }: { children: ReactNode }) {
 
   const navItems: NavItem[] = [
     { href: "/hq", label: "Tenants", icon: Building2 },
+    { href: "/hq/team", label: "Team", icon: Users },
     { href: "/hq/metrics", label: "Global Metrics", icon: BarChart3 },
   ];
 

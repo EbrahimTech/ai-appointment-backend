@@ -32,6 +32,7 @@ from apps.accounts.models import (
     ClinicMembership,
     Invitation,
     SupportSession,
+    StaffAccount,
     Notification,
     NotificationStatus,
 )
@@ -3356,4 +3357,174 @@ class ClinicPatientAIToggleView(APIView):
         )
 
         return ok_response({"id": patient.id, "ai_enabled": patient.ai_enabled})
+
+
+class HQStaffListView(APIView):
+    """List and create HQ staff accounts."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_hq_role()
+    def get(self, request):
+        staff_accounts = StaffAccount.objects.select_related("user").order_by("user__email")
+        items = []
+        for staff in staff_accounts:
+            user = staff.user
+            name = f"{user.first_name} {user.last_name}".strip()
+            items.append(
+                {
+                    "id": staff.id,
+                    "email": user.email,
+                    "name": name or user.username or "",
+                    "role": staff.role,
+                    "is_active": user.is_active,
+                    "last_login": user.last_login.isoformat() if user.last_login else None,
+                    "created_at": staff.created_at.isoformat(),
+                }
+            )
+        return ok_response({"items": items})
+
+    @require_hq_role(allowed=[StaffAccount.Role.SUPERADMIN])
+    def post(self, request):
+        payload = request.data or {}
+        email = str(payload.get("email", "")).strip().lower()
+        role = str(payload.get("role", "")).strip().upper()
+        first_name = str(payload.get("first_name", "")).strip()
+        last_name = str(payload.get("last_name", "")).strip()
+        password = str(payload.get("password", "")).strip()
+
+        if not email or not role:
+            return error_response("INVALID_PAYLOAD", status_code=400)
+        try:
+            validate_email(email)
+        except ValidationError:
+            return error_response("INVALID_EMAIL", status_code=400)
+
+        valid_roles = {choice for choice, _label in StaffAccount.Role.choices}
+        if role not in valid_roles:
+            return error_response("INVALID_ROLE", status_code=400)
+
+        temp_password = None
+        with transaction.atomic():
+            user = User.objects.filter(email__iexact=email).first()
+            if user and hasattr(user, "staff_account"):
+                return error_response("ALREADY_STAFF", status_code=400)
+
+            if user is None:
+                username = email
+                user = User.objects.create(
+                    username=username,
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    is_active=True,
+                    is_staff=True,
+                )
+                if password:
+                    user.set_password(password)
+                else:
+                    temp_password = secrets.token_urlsafe(10)
+                    user.set_password(temp_password)
+                user.save(update_fields=["password"])
+            else:
+                update_fields = []
+                if first_name and user.first_name != first_name:
+                    user.first_name = first_name
+                    update_fields.append("first_name")
+                if last_name and user.last_name != last_name:
+                    user.last_name = last_name
+                    update_fields.append("last_name")
+                if password:
+                    user.set_password(password)
+                    update_fields.append("password")
+                if not user.is_staff:
+                    user.is_staff = True
+                    update_fields.append("is_staff")
+                if update_fields:
+                    user.save(update_fields=update_fields)
+
+            staff = StaffAccount.objects.create(user=user, role=role)
+
+            AuditLog.objects.create(
+                actor_user=request.user,
+                action="HQ_STAFF_CREATE",
+                scope=AuditLog.Scope.HQ,
+                meta={
+                    "staff_id": staff.id,
+                    "email": user.email,
+                    "role": staff.role,
+                },
+            )
+
+        return ok_response(
+            {
+                "id": staff.id,
+                "email": user.email,
+                "name": f"{user.first_name} {user.last_name}".strip(),
+                "role": staff.role,
+                "temp_password": temp_password,
+            }
+        )
+
+
+class HQStaffDetailView(APIView):
+    """Update or remove HQ staff accounts."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @require_hq_role(allowed=[StaffAccount.Role.SUPERADMIN])
+    def put(self, request, staff_id: int):
+        payload = request.data or {}
+        role = str(payload.get("role", "")).strip().upper()
+
+        valid_roles = {choice for choice, _label in StaffAccount.Role.choices}
+        if role not in valid_roles:
+            return error_response("INVALID_ROLE", status_code=400)
+
+        staff = StaffAccount.objects.select_related("user").filter(id=staff_id).first()
+        if staff is None:
+            return error_response("NOT_FOUND", status_code=404)
+
+        if staff.user_id == request.user.id and role != StaffAccount.Role.SUPERADMIN:
+            return error_response("CANNOT_DEMOTE_SELF", status_code=400)
+
+        if staff.role != role:
+            staff.role = role
+            staff.save(update_fields=["role", "updated_at"])
+
+        AuditLog.objects.create(
+            actor_user=request.user,
+            action="HQ_STAFF_UPDATE",
+            scope=AuditLog.Scope.HQ,
+            meta={
+                "staff_id": staff.id,
+                "role": staff.role,
+            },
+        )
+
+        return ok_response({"id": staff.id, "role": staff.role})
+
+    @require_hq_role(allowed=[StaffAccount.Role.SUPERADMIN])
+    def delete(self, request, staff_id: int):
+        staff = StaffAccount.objects.select_related("user").filter(id=staff_id).first()
+        if staff is None:
+            return error_response("NOT_FOUND", status_code=404)
+        if staff.user_id == request.user.id:
+            return error_response("CANNOT_REMOVE_SELF", status_code=400)
+
+        user = staff.user
+        staff.delete()
+
+        if user.is_staff:
+            user.is_staff = False
+            user.save(update_fields=["is_staff", "updated_at"])
+
+        AuditLog.objects.create(
+            actor_user=request.user,
+            action="HQ_STAFF_DELETE",
+            scope=AuditLog.Scope.HQ,
+            meta={"staff_id": staff_id, "email": user.email},
+        )
+
+        return ok_response({})
 logger = logging.getLogger(__name__)

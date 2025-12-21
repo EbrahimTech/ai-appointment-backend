@@ -34,6 +34,8 @@ from apps.accounts.views import (
     ClinicWhatsAppTestView,
     ClinicUserDetailView,
     ClinicUserListView,
+    HQStaffDetailView,
+    HQStaffListView,
     HQSupportStartView,
     HQSupportStopView,
     HQMetricsSummaryView,
@@ -165,4 +167,6 @@ urlpatterns = [
     path("hq/support/stop", HQSupportStopView.as_view(), name="hq-support-stop"),
     path("hq/metrics/summary", HQMetricsSummaryView.as_view(), name="hq-metrics-summary"),
     path("hq/tenants", HQTenantListView.as_view(), name="hq-tenants"),
+    path("hq/staff", HQStaffListView.as_view(), name="hq-staff"),
+    path("hq/staff/<int:staff_id>", HQStaffDetailView.as_view(), name="hq-staff-detail"),
 ]
