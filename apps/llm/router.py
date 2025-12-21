@@ -220,7 +220,7 @@ class LLMRouter:
 
         if "reply" in plan:
             reply = str(plan.get("reply") or "")
-            reply = self._sanitize_planner_reply(reply, clinic)
+            reply = self._sanitize_planner_reply(reply, clinic, language)
             if self._reply_requests_service(reply, language):
                 services = list(clinic.services.filter(is_active=True))
                 if len(services) == 1:
@@ -1123,15 +1123,40 @@ class LLMRouter:
 
         return f"{intro}\n" + "\n".join(lines) + f"\n{outro}"
 
-    def _sanitize_planner_reply(self, reply: str, clinic: Clinic) -> str:
+    def _sanitize_planner_reply(self, reply: str, clinic: Clinic, language: str | None = None) -> str:
         services = list(clinic.services.filter(is_active=True))
+        lang = (language or "").lower()
         for service in services:
-            if not service.code:
+            if not service.code and not service.name:
                 continue
-            reply = re.sub(rf"\(\s*{re.escape(service.code)}\s*\)", "", reply)
-            reply = re.sub(rf"\b{re.escape(service.code)}\b", service.name, reply)
+            display_name = self._service_display_name(clinic, service, language or "")
+            if service.code:
+                reply = re.sub(rf"\(\s*{re.escape(service.code)}\s*\)", "", reply)
+                reply = re.sub(rf"\b{re.escape(service.code)}\b", display_name, reply, flags=re.IGNORECASE)
+            if lang.startswith("ar") and service.name and any(
+                ch.isascii() and ch.isalpha() for ch in service.name
+            ):
+                reply = re.sub(re.escape(service.name), display_name, reply, flags=re.IGNORECASE)
+        if lang.startswith("ar"):
+            reply = re.sub(r"\(\s*[A-Za-z0-9 _-]+\s*\)", "", reply)
         reply = re.sub(r"\s{2,}", " ", reply).strip()
+        reply = re.sub(r"\(\s*\)", "", reply).strip()
+        reply = re.sub(r"\s+([,.،:;!?؟])", r"\1", reply)
         return reply
+
+    def _service_display_name(self, clinic: Clinic, service, language: str) -> str:
+        lang = (language or "").lower()
+        if lang.startswith("ar"):
+            if getattr(service, "language", None) == "ar" and service.name:
+                return service.name
+            if service.code:
+                translated = clinic.services.filter(code=service.code, language="ar").first()
+                if translated and translated.name:
+                    return translated.name
+            if service.name and not any(ch.isascii() and ch.isalpha() for ch in service.name):
+                return service.name
+            return "\u0627\u0644\u062e\u062f\u0645\u0629"
+        return service.name or service.code or "service"
 
     def _reply_requests_service(self, reply: str, language: str) -> bool:
         lowered = (reply or "").lower()
@@ -1258,7 +1283,8 @@ class LLMRouter:
             "Write one concise sentence that matches the action. "
             "Actions: confirm, cancel, reschedule. "
             "If time is provided, mention it. "
-            "Do not ask questions."
+            "Do not ask questions. "
+            "Respond only in the requested language; if language is Arabic, avoid English words."
         )
         user = (
             f"Language: {lang}\n"
