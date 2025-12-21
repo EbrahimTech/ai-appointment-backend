@@ -46,6 +46,12 @@ class DialogOrchestrator:
         body: str,
         language: str,
     ) -> Tuple[str | None, str]:
+        if (
+            conversation.patient
+            and conversation.patient.language
+            and not self._contains_letters(body)
+        ):
+            language = conversation.patient.language
         normalized = normalize_text(body)
         intent = "greet" if self._is_greeting(normalized) else detect_intent(normalized)
         # LLM intent fallback (structured) to better understand Arabic/free-form requests
@@ -140,22 +146,15 @@ class DialogOrchestrator:
             )
             if pending_reply:
                 response_text, pending_intent = pending_reply
-                ConversationMessage.objects.create(
+                response_text = self._send_outbound_message(
                     conversation=conversation,
-                    direction="outbound",
                     language=language,
                     body=response_text,
                     intent=pending_intent,
                     metadata={"auto_reply": True, "pending_action": True},
+                    idempotency_key=f"{conversation.id}:{inbound_message.id}",
+                    queue_session=queue_session,
                 )
-                if queue_session:
-                    enqueue_whatsapp_session_message(
-                        clinic_id=conversation.clinic_id,
-                        conversation=conversation,
-                        language=language,
-                        message_body=response_text,
-                        idempotency_key=f"{conversation.id}:{inbound_message.id}",
-                    )
                 return response_text, pending_intent
 
         if intent == "greet":
