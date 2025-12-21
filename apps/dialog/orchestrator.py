@@ -238,7 +238,7 @@ class DialogOrchestrator:
                 return response_text, "book"
 
         # Track repeated unproductive intents to auto-handoff
-        productive_intents = {"book", "confirm", "cancel", "reschedule"}
+        productive_intents = {"book", "confirm", "cancel", "reschedule", "pricing", "services", "xray", "policy"}
         repeat_threshold = int(getattr(settings, "WHATSAPP_REPEAT_HANDOFF_THRESHOLD", 3))
         repeat_window_minutes = int(
             getattr(settings, "WHATSAPP_REPEAT_RESET_MINUTES", 30)
@@ -673,6 +673,19 @@ class DialogOrchestrator:
         state = ctx.get("state") or "ASK_REASON"
         turns = int(ctx.get("turns", 0)) + 1
         ctx["turns"] = turns
+        max_turns = int(getattr(settings, "BOOKING_MAX_TURNS", 8))
+        if turns > max_turns:
+            self._clear_booking_flow(session_state)
+            if not conversation.handoff_required:
+                conversation.handoff_required = True
+                conversation.save(update_fields=["handoff_required", "updated_at"])
+                try:
+                    from apps.accounts.notifications import notify_handoff
+
+                    notify_handoff(conversation)
+                except Exception as err:  # pragma: no cover - best effort logging
+                    logger.warning("Failed to create handoff notification: %s", err)
+            return AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
 
         clinic = conversation.clinic
         services = list(clinic.services.filter(is_active=True).order_by("name"))

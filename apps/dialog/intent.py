@@ -31,6 +31,10 @@ def detect_intent(text: str) -> str:
         "confirm": {"confirm", "yes", "done", "تأكيد", "موافق", "تمام"},
         "cancel": {"cancel", "drop", "no", "الغاء", "إلغاء", "الغي", "ألغي", "ألغى"},
         "reschedule": {"reschedule", "change", "move", "تغيير", "تعديل", "أغير"},
+        "pricing": {"price", "pricing", "cost", "fees", "سعر", "اسعار", "أسعار", "تكلفة", "رسوم"},
+        "services": {"service", "services", "offer", "خدمات", "الخدمات", "الخدمة", "ماذا تقدمون"},
+        "xray": {"xray", "x-ray", "radiograph", "اشعة", "أشعة", "تصوير"},
+        "policy": {"policy", "سياسة", "سياسات", "شروط"},
     }
 
     for intent, vocab in keywords.items():
