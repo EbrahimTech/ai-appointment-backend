@@ -68,6 +68,8 @@ class LoginView(APIView):
         clinics = _serialize_clinics(user)
         staff = getattr(user, "staff_account", None)
         with transaction.atomic():
+            user.last_login = timezone.now()
+            user.save(update_fields=["last_login"])
             AuditLog.objects.create(
                 actor_user=user,
                 action="LOGIN_SUCCESS",

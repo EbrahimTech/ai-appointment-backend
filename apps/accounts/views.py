@@ -3400,7 +3400,7 @@ class HQStaffListView(APIView):
         except ValidationError:
             return error_response("INVALID_EMAIL", status_code=400)
 
-        valid_roles = {choice for choice, _label in StaffAccount.Role.choices}
+        valid_roles = {StaffAccount.Role.SUPERADMIN, StaffAccount.Role.OPS}
         if role not in valid_roles:
             return error_response("INVALID_ROLE", status_code=400)
 
@@ -3477,7 +3477,7 @@ class HQStaffDetailView(APIView):
         payload = request.data or {}
         role = str(payload.get("role", "")).strip().upper()
 
-        valid_roles = {choice for choice, _label in StaffAccount.Role.choices}
+        valid_roles = {StaffAccount.Role.SUPERADMIN, StaffAccount.Role.OPS}
         if role not in valid_roles:
             return error_response("INVALID_ROLE", status_code=400)
 

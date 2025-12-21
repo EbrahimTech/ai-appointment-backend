@@ -30,21 +30,21 @@ type StaffMember = {
 
 const createSchema = z.object({
   email: z.string().email(),
-  role: z.enum(["SUPERADMIN", "OPS", "SUPPORT", "SALES"]),
+  role: z.enum(["SUPERADMIN", "OPS"]),
   first_name: z.string().optional(),
   last_name: z.string().optional(),
   password: z.string().optional(),
 });
 
 const updateSchema = z.object({
-  role: z.enum(["SUPERADMIN", "OPS", "SUPPORT", "SALES"]),
+  role: z.enum(["SUPERADMIN", "OPS"]),
 });
 
 const ROLE_LABELS: Record<StaffMember["role"], string> = {
   SUPERADMIN: "Super Admin",
   OPS: "Ops",
-  SUPPORT: "Support",
-  SALES: "Sales",
+  SUPPORT: "Support (legacy)",
+  SALES: "Sales (legacy)",
 };
 
 export default function HQTeamPage() {
@@ -324,8 +324,6 @@ export default function HQTeamPage() {
               >
                 <option value="SUPERADMIN">Super Admin</option>
                 <option value="OPS">Ops</option>
-                <option value="SUPPORT">Support</option>
-                <option value="SALES">Sales</option>
               </select>
             </div>
 
@@ -419,7 +417,7 @@ export default function HQTeamPage() {
                       <Cell>
                         {selectedId === member.id ? (
                           <select
-                            defaultValue={member.role}
+                            defaultValue={member.role === "SUPERADMIN" || member.role === "OPS" ? member.role : "OPS"}
                             onChange={(event) =>
                               updateMutation.mutate({
                                 id: member.id,
@@ -430,8 +428,6 @@ export default function HQTeamPage() {
                           >
                             <option value="SUPERADMIN">Super Admin</option>
                             <option value="OPS">Ops</option>
-                            <option value="SUPPORT">Support</option>
-                            <option value="SALES">Sales</option>
                           </select>
                         ) : (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
