@@ -1490,7 +1490,7 @@ class DialogOrchestrator:
     def _is_booking_complaint(self, normalized: str) -> bool:
         if not normalized:
             return False
-        if any(token in normalized for token in {"لماذا", "ليش", "كيف"}):
+        if any(token in normalized for token in {"لماذا", "ليش"}):
             if any(token in normalized for token in {"تحجز", "حجز", "موعد"}):
                 return True
         return False
@@ -1702,9 +1702,7 @@ class DialogOrchestrator:
             return "??????"
         return label or ("??????" if language == "ar" else "service")
 
-def _format_appointment_label(
-        self, appointment, clinic_tz: str, language: str
-    ) -> tuple[str, str]:
+    def _format_appointment_label(self, appointment, clinic_tz: str, language: str) -> tuple[str, str]:
         tz = ZoneInfo(clinic_tz or "UTC")
         start_label = "unknown time"
         if getattr(appointment, "start_at", None):
@@ -1744,10 +1742,8 @@ def _format_appointment_label(
             intro = "You have multiple upcoming appointments. Please choose one:"
             outro = "Reply with a single number (e.g., 1 or 2)."
 
-        return "
-".join([intro, *lines, outro])
-
-def _extract_choice_index(self, text: str, max_value: int) -> int | None:
+        return "\n".join([intro, *lines, outro])
+    def _extract_choice_index(self, text: str, max_value: int) -> int | None:
         if not text or max_value < 1:
             return None
         normalized = self._normalize_digits(text)
