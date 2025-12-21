@@ -1952,6 +1952,126 @@ def book_appointment(
     return appointment, None, warning
 
 
+def reschedule_appointment(
+    *,
+    clinic: Clinic,
+    appointment: Appointment,
+    start_local: datetime,
+) -> tuple[Appointment | None, str | None, bool]:
+    """Reschedule an existing appointment and sync with Google if possible."""
+    if not start_local or appointment is None or appointment.service is None:
+        return None, "INVALID_SERVICE", False
+
+    service = appointment.service
+    duration = timedelta(minutes=service.duration_minutes)
+    end_local = start_local + duration
+    if not _is_within_service_hours(service, start_local, end_local):
+        return None, "OUT_OF_HOURS", False
+
+    google_available, google_failed = _check_google_availability(
+        clinic, start_local, end_local, exclude_appointment=appointment
+    )
+    if not google_available:
+        return None, "SLOT_TAKEN", False
+
+    start_utc = start_local.astimezone(dt_timezone.utc)
+    end_utc = end_local.astimezone(dt_timezone.utc)
+
+    with transaction.atomic():
+        if _has_overlap(clinic, service, start_utc, end_utc, exclude=appointment.id):
+            return None, "SLOT_TAKEN", False
+        appointment.slot = (start_utc, end_utc)
+        appointment.status = AppointmentStatus.BOOKED
+        appointment.save(update_fields=["slot", "status", "updated_at"])
+
+    warning = False
+    credential = _get_google_credential(clinic)
+    calendar_event = getattr(appointment, "calendar_event", None)
+
+    if google_failed:
+        appointment.sync_state = AppointmentSyncState.TENTATIVE
+        appointment.google_last_error = "google_sync_pending"
+        appointment.save(
+            update_fields=["sync_state", "google_last_error", "updated_at"]
+        )
+        warning = True
+        schedule_google_calendar_retry(appointment.id)
+    elif credential:
+        try:
+            if calendar_event:
+                GoogleCalendarService().cancel_event(calendar_event, credential)
+                calendar_event.delete()
+            new_event = GoogleCalendarService().create_event(appointment, credential)
+            appointment.external_event_id = new_event.external_event_id
+            appointment.sync_state = AppointmentSyncState.OK
+            appointment.google_retry_count = 0
+            appointment.google_last_error = ""
+            appointment.save(
+                update_fields=[
+                    "external_event_id",
+                    "sync_state",
+                    "google_retry_count",
+                    "google_last_error",
+                    "updated_at",
+                ]
+            )
+        except GoogleCalendarServiceError:
+            appointment.sync_state = AppointmentSyncState.TENTATIVE
+            appointment.google_retry_count += 1
+            appointment.google_last_error = "google_sync_error"
+            appointment.save(
+                update_fields=["sync_state", "google_retry_count", "google_last_error", "updated_at"]
+            )
+            warning = True
+            schedule_google_calendar_retry(appointment.id)
+    else:
+        appointment.sync_state = AppointmentSyncState.OK
+        appointment.google_retry_count = 0
+        appointment.google_last_error = ""
+        appointment.save(
+            update_fields=["sync_state", "google_retry_count", "google_last_error", "updated_at"]
+        )
+
+    return appointment, None, warning
+
+
+def cancel_appointment(
+    *,
+    clinic: Clinic,
+    appointment: Appointment,
+) -> tuple[Appointment, bool]:
+    """Cancel an appointment and sync with Google if possible."""
+    with transaction.atomic():
+        calendar_event = getattr(appointment, "calendar_event", None)
+        appointment.status = AppointmentStatus.CANCELLED
+        appointment.external_event_id = None
+        appointment.sync_state = AppointmentSyncState.OK
+        appointment.google_retry_count = 0
+        appointment.google_last_error = ""
+        appointment.save(
+            update_fields=[
+                "status",
+                "external_event_id",
+                "sync_state",
+                "google_retry_count",
+                "google_last_error",
+                "updated_at",
+            ]
+        )
+
+    warning = False
+    credential = _get_google_credential(clinic)
+    if calendar_event and credential:
+        try:
+            GoogleCalendarService().cancel_event(calendar_event, credential)
+        except GoogleCalendarServiceError:
+            warning = True
+        finally:
+            calendar_event.delete()
+
+    return appointment, warning
+
+
 def _serialize_appointment(appointment: Appointment) -> Dict[str, object]:
     """Represent appointment with sync_state (ok|tentative|failed)."""
     return {

@@ -18,6 +18,7 @@ from apps.clinics.models import Clinic, LanguageChoices
 from apps.conversations.models import Conversation, SessionState
 from apps.kb.models import KnowledgeChunk, KnowledgeIndex
 from apps.llm.models import LLMProvider, LLMRequestLog, RetrievalLog
+from apps.appointments.models import Appointment, AppointmentStatus
 from apps.appointments.scheduling import SuggestedSlot, find_available_slots, suggest_slots
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,12 @@ class LLMRouter:
             self._mark_economy_mode(session_state, conversation)
             raise LLMRouterError("llm_budget_exhausted")
 
-        plan = self._plan_tool_call(clinic=clinic, language=language, prompt=prompt)
+        plan = self._plan_tool_call(
+            clinic=clinic,
+            language=language,
+            prompt=prompt,
+            conversation=conversation,
+        )
         if not plan:
             return None, [], None
 
@@ -271,6 +277,109 @@ class LLMRouter:
             if error == "missing_patient":
                 return "I need your details before I can book. Please share your name.", [], None
             return "I could not book that time. Please choose another time.", [], None
+
+        if tool_name == "cancel_appointment":
+            if not getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
+                return None, [], None
+            tool_result = self._tool_cancel_appointment(
+                clinic=clinic,
+                conversation=conversation,
+                args=plan.get("args") or {},
+            )
+            appointment = tool_result.get("appointment")
+            if appointment:
+                time_label = None
+                if appointment.start_at:
+                    tz = ZoneInfo(clinic.tz or "UTC")
+                    time_label = appointment.start_at.astimezone(tz).strftime("%A %d %b %I:%M %p")
+                reply = (
+                    f"Your appointment for {time_label} has been cancelled."
+                    if time_label
+                    else "Your appointment has been cancelled."
+                )
+                try:
+                    reply = self.compose_action_reply(
+                        language=language,
+                        action="cancel",
+                        time_label=time_label,
+                        clinic_name=clinic.name,
+                        conversation_id=conversation_id,
+                    )
+                except LLMRouterError as exc:
+                    logger.warning("LLM action reply skipped: %s", exc)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error("LLM action reply error: %s", exc, exc_info=True)
+                return reply, [], {"action": "cancelled", "appointment_id": appointment.id}
+
+            error = tool_result.get("error")
+            if error == "missing_patient":
+                return "I need your details before I can cancel. Please share your name.", [], None
+            if error == "no_upcoming":
+                return "I couldn't find an upcoming appointment to cancel.", [], None
+            if error == "not_found":
+                return "I couldn't match that appointment. Please share the date/time.", [], None
+            return "I couldn't cancel that appointment. Please share the date/time.", [], None
+
+        if tool_name == "reschedule_appointment":
+            if not getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
+                return None, [], None
+            tool_result = self._tool_reschedule_appointment(
+                clinic=clinic,
+                conversation=conversation,
+                args=plan.get("args") or {},
+            )
+            appointment = tool_result.get("appointment")
+            if appointment:
+                start_local = tool_result.get("start_local")
+                time_label = None
+                if isinstance(start_local, datetime):
+                    tz = ZoneInfo(clinic.tz or "UTC")
+                    time_label = start_local.astimezone(tz).strftime("%A %d %b %I:%M %p")
+                reply = (
+                    f"Your appointment has been rescheduled to {time_label}."
+                    if time_label
+                    else "Your appointment has been rescheduled."
+                )
+                try:
+                    reply = self.compose_action_reply(
+                        language=language,
+                        action="reschedule",
+                        time_label=time_label,
+                        clinic_name=clinic.name,
+                        conversation_id=conversation_id,
+                    )
+                except LLMRouterError as exc:
+                    logger.warning("LLM action reply skipped: %s", exc)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error("LLM action reply error: %s", exc, exc_info=True)
+                return reply, [], {
+                    "action": "rescheduled",
+                    "appointment_id": appointment.id,
+                }
+
+            slots = tool_result.get("slots") or []
+            if slots:
+                reply = self._finalize_tool_reply(language, prompt, slots)
+                return reply, slots, {
+                    "action": "reschedule",
+                    "appointment_id": tool_result.get("appointment_id"),
+                    "service_code": tool_result.get("service_code"),
+                }
+
+            error = tool_result.get("error")
+            if error == "missing_patient":
+                return "I need your details before I can reschedule. Please share your name.", [], None
+            if error == "missing_service":
+                return "Which service would you like to reschedule?", [], None
+            if error == "missing_time":
+                return "What time would you like instead?", [], None
+            if error == "no_upcoming":
+                return "I couldn't find an upcoming appointment to reschedule.", [], None
+            if error == "SLOT_TAKEN":
+                return "That time is no longer available. Please choose another time.", [], None
+            if error == "OUT_OF_HOURS":
+                return "That time is outside our working hours. Please choose another time.", [], None
+            return "I couldn't reschedule that appointment. Please share a new time.", [], None
 
         if tool_name != "get_available_slots":
             return str(plan.get("reply") or ""), [], None
@@ -418,11 +527,29 @@ class LLMRouter:
             "- Do not provide medical advice or pricing not present in context."
         )
 
-    def _plan_tool_call(self, *, clinic: Clinic, language: str, prompt: str) -> dict | None:
+    def _plan_tool_call(
+        self,
+        *,
+        clinic: Clinic,
+        language: str,
+        prompt: str,
+        conversation: Conversation | None,
+    ) -> dict | None:
         services = list(clinic.services.filter(is_active=True).order_by("name")[:20])
         service_list = "\n".join([f"- {svc.code}: {svc.name}" for svc in services]) or "No services"
         tz = clinic.tz or "UTC"
         now_local = timezone.now().astimezone(ZoneInfo(tz))
+        upcoming_text = "No upcoming appointments"
+        if conversation and conversation.patient:
+            upcoming = self._list_upcoming_appointments(clinic, conversation.patient, limit=3)
+            if upcoming:
+                lines = []
+                for appt in upcoming:
+                    start_local = appt.start_at.astimezone(ZoneInfo(tz)) if appt.start_at else None
+                    start_label = start_local.strftime("%Y-%m-%d %H:%M") if start_local else "unknown"
+                    service_label = appt.service.name if appt.service else "service"
+                    lines.append(f"- id:{appt.id} {start_label} {service_label} status:{appt.status}")
+                upcoming_text = "\n".join(lines)
 
         system = (
             "You are a dental clinic assistant. "
@@ -431,6 +558,10 @@ class LLMRouter:
             '{"tool":"get_available_slots","args":{"service_code":"...", "from_iso":"", "to_iso":"", "limit":3}}. '
             "If the user provides a specific date/time and wants to book, return: "
             '{"tool":"book_appointment","args":{"service_code":"...", "start_iso":"YYYY-MM-DDTHH:MM:SS+TZ"}}. '
+            "If the user asks to cancel an upcoming appointment, return: "
+            '{"tool":"cancel_appointment","args":{"appointment_id":123,"start_iso":""}}. '
+            "If the user asks to reschedule, return: "
+            '{"tool":"reschedule_appointment","args":{"appointment_id":123,"new_start_iso":"YYYY-MM-DDTHH:MM:SS+TZ"}}. '
             "Use a service_code from the list (or the only service if there is one). "
             "Use the clinic timezone when producing start_iso. "
             "If you need clarification, return JSON with a reply: "
@@ -443,7 +574,9 @@ class LLMRouter:
                 "role": "user",
                 "content": (
                     f"Clinic time now: {now_local.isoformat()} ({tz})\n"
-                    f"Services:\n{service_list}\n\nUser: {prompt}\nLanguage: {language}"
+                    f"Services:\n{service_list}\n"
+                    f"Upcoming appointments:\n{upcoming_text}\n\n"
+                    f"User: {prompt}\nLanguage: {language}"
                 ),
             },
         ]
@@ -553,6 +686,167 @@ class LLMRouter:
             "slots": slots,
             "service_code": service_code,
         }
+
+    def _tool_cancel_appointment(
+        self,
+        *,
+        clinic: Clinic,
+        conversation: Conversation | None,
+        args: dict,
+    ) -> dict:
+        patient = conversation.patient if conversation else None
+        if not patient:
+            return {"error": "missing_patient"}
+
+        appointment = self._resolve_appointment(
+            clinic=clinic,
+            patient=patient,
+            appointment_id=args.get("appointment_id"),
+            start_iso=args.get("start_iso"),
+        )
+        if not appointment:
+            if self._list_upcoming_appointments(clinic, patient, limit=1):
+                return {"error": "not_found"}
+            return {"error": "no_upcoming"}
+
+        from apps.accounts.views import cancel_appointment
+
+        cancel_appointment(clinic=clinic, appointment=appointment)
+        return {"appointment": appointment}
+
+    def _tool_reschedule_appointment(
+        self,
+        *,
+        clinic: Clinic,
+        conversation: Conversation | None,
+        args: dict,
+    ) -> dict:
+        patient = conversation.patient if conversation else None
+        if not patient:
+            return {"error": "missing_patient"}
+
+        appointment = self._resolve_appointment(
+            clinic=clinic,
+            patient=patient,
+            appointment_id=args.get("appointment_id"),
+            start_iso=args.get("start_iso"),
+        )
+        if not appointment:
+            if self._list_upcoming_appointments(clinic, patient, limit=1):
+                return {"error": "not_found"}
+            return {"error": "no_upcoming"}
+
+        start_iso = args.get("new_start_iso") or args.get("start_iso")
+        tzinfo = ZoneInfo(clinic.tz or "UTC")
+        start_local = self._parse_tool_datetime(start_iso, tzinfo) if start_iso else None
+        if not start_local:
+            service = appointment.service
+            if not service:
+                return {"error": "missing_service"}
+            slots = find_available_slots(
+                clinic,
+                service,
+                start=timezone.now().astimezone(tzinfo),
+                end=timezone.now().astimezone(tzinfo) + timedelta(days=7),
+                limit=3,
+            )
+            return {
+                "slots": slots,
+                "appointment_id": appointment.id,
+                "service_code": service.code if service else "",
+            }
+
+        from apps.accounts.views import reschedule_appointment
+
+        appointment, error_code, _warning = reschedule_appointment(
+            clinic=clinic,
+            appointment=appointment,
+            start_local=start_local,
+        )
+        if appointment:
+            return {"appointment": appointment, "start_local": start_local}
+
+        slots = []
+        if error_code in {"SLOT_TAKEN", "OUT_OF_HOURS"} and appointment and appointment.service:
+            slots = find_available_slots(
+                clinic,
+                appointment.service,
+                start=start_local,
+                end=start_local + timedelta(days=7),
+                limit=3,
+            )
+        return {
+            "error": error_code or "RESCHEDULE_FAILED",
+            "slots": slots,
+            "appointment_id": appointment.id if appointment else None,
+            "service_code": appointment.service.code if appointment and appointment.service else "",
+        }
+
+    def _list_upcoming_appointments(self, clinic: Clinic, patient, limit: int = 3) -> list[Appointment]:
+        now = timezone.now()
+        return list(
+            Appointment.objects.filter(
+                clinic=clinic,
+                patient=patient,
+                status__in=[
+                    AppointmentStatus.PENDING,
+                    AppointmentStatus.BOOKED,
+                    AppointmentStatus.CONFIRMED,
+                ],
+                slot__lower__gte=now,
+            )
+            .order_by("slot__lower")[:limit]
+        )
+
+    def _resolve_appointment(
+        self,
+        *,
+        clinic: Clinic,
+        patient,
+        appointment_id: object | None,
+        start_iso: object | None,
+    ) -> Appointment | None:
+        qs = Appointment.objects.filter(
+            clinic=clinic,
+            patient=patient,
+            status__in=[
+                AppointmentStatus.PENDING,
+                AppointmentStatus.BOOKED,
+                AppointmentStatus.CONFIRMED,
+            ],
+        )
+        if appointment_id:
+            try:
+                appointment_id_int = int(appointment_id)
+            except (TypeError, ValueError):
+                appointment_id_int = None
+            if appointment_id_int:
+                return qs.filter(id=appointment_id_int).order_by("slot__lower").first()
+
+        tzinfo = ZoneInfo(clinic.tz or "UTC")
+        start_local = self._parse_tool_datetime(str(start_iso), tzinfo) if start_iso else None
+        candidates = list(qs.order_by("slot__lower")[:5])
+        if start_local and candidates:
+            target_date = start_local.astimezone(tzinfo).date()
+            same_day = [
+                appt
+                for appt in candidates
+                if appt.start_at and appt.start_at.astimezone(tzinfo).date() == target_date
+            ]
+            pool = same_day or candidates
+            closest = None
+            closest_delta = None
+            for appt in pool:
+                if not appt.start_at:
+                    continue
+                delta = abs((appt.start_at - start_local).total_seconds())
+                if closest_delta is None or delta < closest_delta:
+                    closest_delta = delta
+                    closest = appt
+            if closest:
+                return closest
+
+        return qs.order_by("slot__lower").first()
 
     def _finalize_tool_reply(self, language: str, prompt: str, slots: list[SuggestedSlot]) -> str:
         lang = (language or "en").lower()
