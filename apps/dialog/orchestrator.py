@@ -97,7 +97,11 @@ class DialogOrchestrator:
             if (timezone.now() - previous_inbound.created_at) <= timedelta(minutes=duplicate_window_minutes):
                 suppress_duplicate = True
 
-        if suppress_duplicate and session_state.context.get("slot_suggestions"):
+        if suppress_duplicate and (
+            session_state.context.get("slot_suggestions")
+            or session_state.context.get("action_flow")
+            or session_state.context.get("pending_action")
+        ):
             suppress_duplicate = False
 
         if suppress_duplicate:
@@ -237,6 +241,32 @@ class DialogOrchestrator:
                     idempotency_key=f"booking:{conversation.id}:{inbound_message.id}",
                 )
                 return response_text, "book"
+
+        action_reply = self._handle_action_flow(
+            conversation=conversation,
+            session_state=session_state,
+            body=body,
+            language=language,
+            intent=intent,
+        )
+        if action_reply:
+            response_text, action_intent = action_reply
+            ConversationMessage.objects.create(
+                conversation=conversation,
+                direction="outbound",
+                language=language,
+                body=response_text,
+                intent=action_intent,
+                metadata={"auto_reply": True, "flow": "action"},
+            )
+            enqueue_whatsapp_session_message(
+                clinic_id=conversation.clinic_id,
+                conversation=conversation,
+                language=language,
+                message_body=response_text,
+                idempotency_key=f"action:{conversation.id}:{inbound_message.id}",
+            )
+            return response_text, action_intent
 
         # Track repeated unproductive intents to auto-handoff
         productive_intents = {"book", "confirm", "cancel", "reschedule", "pricing", "services", "xray", "policy"}
@@ -808,6 +838,207 @@ class DialogOrchestrator:
         )
         session_state.save(update_fields=["context", "updated_at"])
         return prompt
+
+    def _handle_action_flow(
+        self,
+        *,
+        conversation: Conversation,
+        session_state: SessionState,
+        body: str,
+        language: str,
+        intent: str,
+    ) -> tuple[str, str] | None:
+        ctx = session_state.context.get("action_flow") or {}
+        action_intent = ctx.get("intent") or intent
+        if action_intent not in {"cancel", "reschedule"}:
+            if ctx:
+                self._clear_action_flow(session_state)
+                session_state.save(update_fields=["context", "updated_at"])
+            return None
+
+        turns = int(ctx.get("turns", 0)) + 1
+        ctx["turns"] = turns
+        max_turns = int(getattr(settings, "BOOKING_MAX_TURNS", 8))
+        if turns > max_turns:
+            self._clear_action_flow(session_state)
+            if not conversation.handoff_required:
+                conversation.handoff_required = True
+                conversation.save(update_fields=["handoff_required", "updated_at"])
+                try:
+                    from apps.accounts.notifications import notify_handoff
+
+                    notify_handoff(conversation)
+                except Exception as err:  # pragma: no cover - best effort logging
+                    logger.warning("Failed to create handoff notification: %s", err)
+            fallback = AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+            session_state.save(update_fields=["context", "updated_at"])
+            return fallback, "handoff"
+
+        if not conversation.patient:
+            self._clear_action_flow(session_state)
+            session_state.save(update_fields=["context", "updated_at"])
+            if language == "ar":
+                return "احتاج إلى بياناتك قبل تحديث الموعد. هل يمكنك مشاركة اسمك؟", action_intent
+            return "I need your details before updating the appointment. Please share your name.", action_intent
+
+        state = ctx.get("state") or "ASK_APPOINTMENT"
+        choices = ctx.get("choices") or []
+
+        if state == "ASK_APPOINTMENT":
+            appointments = self._list_upcoming_appointments(conversation, limit=3)
+            if not appointments:
+                self._clear_action_flow(session_state)
+                session_state.save(update_fields=["context", "updated_at"])
+                if language == "ar":
+                    if action_intent == "cancel":
+                        return "لا أجد مواعيد قادمة لإلغائها.", action_intent
+                    return "لا أجد مواعيد قادمة لتغييرها.", action_intent
+                if action_intent == "cancel":
+                    return "I couldn't find any upcoming appointments to cancel.", action_intent
+                return "I couldn't find any upcoming appointments to reschedule.", action_intent
+
+            if len(appointments) == 1:
+                appointment = appointments[0]
+                if action_intent == "cancel":
+                    prompt = self._build_confirmation_prompt(
+                        tool_name="cancel_appointment",
+                        appointment=appointment,
+                        new_start_iso=None,
+                        language=language,
+                        clinic_tz=conversation.clinic.tz,
+                    )
+                    session_state.context["pending_action"] = {
+                        "tool": "cancel_appointment",
+                        "args": {"appointment_id": appointment.id},
+                        "appointment_id": appointment.id,
+                        "stage": "confirm",
+                    }
+                    self._clear_action_flow(session_state)
+                    session_state.save(update_fields=["context", "updated_at"])
+                    return prompt, action_intent
+
+                session_state.context["pending_action"] = {
+                    "tool": "reschedule_appointment",
+                    "args": {"appointment_id": appointment.id},
+                    "appointment_id": appointment.id,
+                    "stage": "await_time",
+                }
+                session_state.context["reschedule_appointment_id"] = appointment.id
+                self._clear_action_flow(session_state)
+                session_state.save(update_fields=["context", "updated_at"])
+                if language == "ar":
+                    return "ما الوقت الذي تريده بدلًا؟", action_intent
+                return "What time would you like instead?", action_intent
+
+            prompt = self._format_appointment_choices(
+                appointments=appointments,
+                clinic_tz=conversation.clinic.tz,
+                language=language,
+            )
+            ctx["state"] = "AWAIT_CHOICE"
+            ctx["intent"] = action_intent
+            ctx["choices"] = [appointment.id for appointment in appointments]
+            session_state.context["action_flow"] = ctx
+            self._record_action_decision(
+                session_state,
+                intent=action_intent,
+                state=ctx["state"],
+                slots={"choices": ctx["choices"]},
+                missing=["appointment"],
+                prompt=prompt,
+                actions=["list_appointments"],
+            )
+            session_state.save(update_fields=["context", "updated_at"])
+            return prompt, action_intent
+
+        if state == "AWAIT_CHOICE":
+            choice = self._extract_choice_index(body, len(choices))
+            if not choice:
+                if language == "ar":
+                    prompt = "الرجاء اختيار رقم من القائمة (مثال: 1 أو 2)."
+                else:
+                    prompt = "Please reply with one of the listed numbers (e.g., 1 or 2)."
+                self._record_action_decision(
+                    session_state,
+                    intent=action_intent,
+                    state=state,
+                    slots={"choices": choices},
+                    missing=["appointment"],
+                    prompt=prompt,
+                    actions=["await_choice"],
+                )
+                session_state.context["action_flow"] = ctx
+                session_state.save(update_fields=["context", "updated_at"])
+                return prompt, action_intent
+
+            appointment_id = choices[choice - 1]
+            appointment = self._resolve_upcoming_appointment(conversation, appointment_id)
+            if not appointment:
+                appointments = self._list_upcoming_appointments(conversation, limit=3)
+                if not appointments:
+                    self._clear_action_flow(session_state)
+                    session_state.save(update_fields=["context", "updated_at"])
+                    if language == "ar":
+                        if action_intent == "cancel":
+                            return "لا أجد مواعيد قادمة لإلغائها.", action_intent
+                        return "لا أجد مواعيد قادمة لتغييرها.", action_intent
+                    if action_intent == "cancel":
+                        return "I couldn't find any upcoming appointments to cancel.", action_intent
+                    return "I couldn't find any upcoming appointments to reschedule.", action_intent
+
+                prompt = self._format_appointment_choices(
+                    appointments=appointments,
+                    clinic_tz=conversation.clinic.tz,
+                    language=language,
+                )
+                ctx["state"] = "AWAIT_CHOICE"
+                ctx["intent"] = action_intent
+                ctx["choices"] = [appointment.id for appointment in appointments]
+                session_state.context["action_flow"] = ctx
+                self._record_action_decision(
+                    session_state,
+                    intent=action_intent,
+                    state=ctx["state"],
+                    slots={"choices": ctx["choices"]},
+                    missing=["appointment"],
+                    prompt=prompt,
+                    actions=["list_appointments"],
+                )
+                session_state.save(update_fields=["context", "updated_at"])
+                return prompt, action_intent
+
+            if action_intent == "cancel":
+                prompt = self._build_confirmation_prompt(
+                    tool_name="cancel_appointment",
+                    appointment=appointment,
+                    new_start_iso=None,
+                    language=language,
+                    clinic_tz=conversation.clinic.tz,
+                )
+                session_state.context["pending_action"] = {
+                    "tool": "cancel_appointment",
+                    "args": {"appointment_id": appointment.id},
+                    "appointment_id": appointment.id,
+                    "stage": "confirm",
+                }
+                self._clear_action_flow(session_state)
+                session_state.save(update_fields=["context", "updated_at"])
+                return prompt, action_intent
+
+            session_state.context["pending_action"] = {
+                "tool": "reschedule_appointment",
+                "args": {"appointment_id": appointment.id},
+                "appointment_id": appointment.id,
+                "stage": "await_time",
+            }
+            session_state.context["reschedule_appointment_id"] = appointment.id
+            self._clear_action_flow(session_state)
+            session_state.save(update_fields=["context", "updated_at"])
+            if language == "ar":
+                return "ما الوقت الذي تريده بدلًا؟", action_intent
+            return "What time would you like instead?", action_intent
+
+        return None
 
     def _record_booking_decision(
         self,
