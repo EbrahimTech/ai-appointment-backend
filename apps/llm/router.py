@@ -653,6 +653,7 @@ class LLMRouter:
             "If the user asks to reschedule, return: "
             '{"tool":"reschedule_appointment","args":{"appointment_id":123,"new_start_iso":"YYYY-MM-DDTHH:MM:SS+TZ"}}. '
             "Use a service_code from the list (or the only service if there is one). "
+            "Never show service codes to the user; use service names only in replies. "
             "Use the clinic timezone when producing start_iso. "
             "If you need clarification, return JSON with a reply: "
             '{"reply":"..."} in the requested language. '
@@ -1084,14 +1085,16 @@ class LLMRouter:
         for service in services:
             if not service.code:
                 continue
+            reply = re.sub(rf"\(\s*{re.escape(service.code)}\s*\)", "", reply)
             reply = re.sub(rf"\b{re.escape(service.code)}\b", service.name, reply)
+        reply = re.sub(r"\s{2,}", " ", reply).strip()
         return reply
 
     def _reply_requests_service(self, reply: str, language: str) -> bool:
         lowered = (reply or "").lower()
         if "service" in lowered:
             return True
-        return "????" in reply or "??????" in reply
+        return "\u062e\u062f\u0645\u0629" in reply or "\u0627\u0644\u062e\u062f\u0645\u0629" in reply
 
 
     def select_slot_from_reply(
