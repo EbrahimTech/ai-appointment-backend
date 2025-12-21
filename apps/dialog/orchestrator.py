@@ -204,14 +204,15 @@ class DialogOrchestrator:
                 intent = "confirm"
 
         booking_flow = session_state.context.get("booking_flow") or {}
-        if (
-            intent == "book"
-            or (
-                booking_flow
-                and booking_flow.get("state") not in {"BOOKED", "DONE"}
-                and intent not in {"confirm", "cancel", "reschedule"}
-            )
-        ):
+        should_handle_booking_flow = False
+        if intent == "book":
+            should_handle_booking_flow = True
+        elif self._asks_for_slots(body) and intent not in {"confirm", "cancel", "reschedule"}:
+            should_handle_booking_flow = True
+        elif booking_flow and booking_flow.get("state") not in {"BOOKED", "DONE"} and intent not in {"confirm", "cancel", "reschedule"}:
+            should_handle_booking_flow = True
+
+        if should_handle_booking_flow:
             response_text = self._handle_booking_flow(
                 conversation=conversation,
                 session_state=session_state,
