@@ -208,7 +208,7 @@ class LLMRouter:
             self._mark_economy_mode(session_state, conversation)
             raise LLMRouterError("llm_budget_exhausted")
 
-        plan = self._plan_tool_call(
+        plan = self.plan_tool_call(
             clinic=clinic,
             language=language,
             prompt=prompt,
@@ -221,6 +221,42 @@ class LLMRouter:
             return str(plan.get("reply") or ""), [], None
 
         tool_name = plan.get("tool")
+        return self.execute_tool_call(
+            clinic=clinic,
+            language=language,
+            prompt=prompt,
+            conversation_id=conversation_id,
+            tool_name=tool_name,
+            args=plan.get("args") or {},
+            conversation=conversation,
+        )
+
+    def plan_tool_call(
+        self,
+        *,
+        clinic: Clinic,
+        language: str,
+        prompt: str,
+        conversation: Conversation | None,
+    ) -> dict | None:
+        return self._plan_tool_call(
+            clinic=clinic,
+            language=language,
+            prompt=prompt,
+            conversation=conversation,
+        )
+
+    def execute_tool_call(
+        self,
+        *,
+        clinic: Clinic,
+        language: str,
+        prompt: str,
+        conversation_id: int | None,
+        tool_name: str | None,
+        args: dict,
+        conversation: Conversation | None = None,
+    ) -> tuple[str | None, list[SuggestedSlot], dict | None]:
         if tool_name == "book_appointment":
             if not getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
                 return None, [], None
@@ -228,7 +264,7 @@ class LLMRouter:
             tool_result = self._tool_book_appointment(
                 clinic=clinic,
                 conversation=conversation,
-                args=plan.get("args") or {},
+                args=args,
                 language=language,
                 prompt=prompt,
             )
@@ -286,7 +322,7 @@ class LLMRouter:
             tool_result = self._tool_cancel_appointment(
                 clinic=clinic,
                 conversation=conversation,
-                args=plan.get("args") or {},
+                args=args,
                 language=language,
                 prompt=prompt,
             )
@@ -330,7 +366,7 @@ class LLMRouter:
             tool_result = self._tool_reschedule_appointment(
                 clinic=clinic,
                 conversation=conversation,
-                args=plan.get("args") or {},
+                args=args,
                 language=language,
                 prompt=prompt,
             )
@@ -388,9 +424,9 @@ class LLMRouter:
             return "I couldn't reschedule that appointment. Please share a new time.", [], None
 
         if tool_name != "get_available_slots":
-            return str(plan.get("reply") or ""), [], None
+            return str(args.get("reply") or ""), [], None
 
-        tool_result = self._tool_get_available_slots(clinic, plan.get("args") or {})
+        tool_result = self._tool_get_available_slots(clinic, args)
         slots = tool_result.get("slots", [])
         meta = {"service_code": tool_result.get("service_code")}
         if not slots:
@@ -829,6 +865,24 @@ class LLMRouter:
             "appointment_id": appointment.id if appointment else None,
             "service_code": appointment.service.code if appointment and appointment.service else "",
         }
+
+    def resolve_appointment_for_confirmation(
+        self,
+        *,
+        clinic: Clinic,
+        conversation: Conversation | None,
+        appointment_id: object | None,
+        start_iso: object | None,
+    ) -> Appointment | None:
+        patient = conversation.patient if conversation else None
+        if not patient:
+            return None
+        return self._resolve_appointment(
+            clinic=clinic,
+            patient=patient,
+            appointment_id=appointment_id,
+            start_iso=start_iso,
+        )
 
     def _list_upcoming_appointments(self, clinic: Clinic, patient, limit: int = 3) -> list[Appointment]:
         now = timezone.now()
