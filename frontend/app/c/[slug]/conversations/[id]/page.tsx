@@ -79,6 +79,7 @@ export default function ConversationDetailPage() {
     },
     refetchInterval: false,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const refetchConversation = conversationQuery.refetch;
 
@@ -110,26 +111,40 @@ export default function ConversationDetailPage() {
     if (!slug || !conversationId) {
       return;
     }
+    if (typeof window === "undefined") {
+      return;
+    }
 
     let isActive = true;
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
 
-    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000").replace(/\/$/, "");
-    const wsBase = backendUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
-    const wsUrl = `${wsBase}/ws/clinic/${slug}/conversations/${conversationId}/`;
-
     const connect = () => {
       if (!isActive) {
         return;
       }
+      const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+      const backendUrl = new URL(backendBase);
+      if (backendUrl.hostname === "localhost" || backendUrl.hostname === "127.0.0.1") {
+        backendUrl.hostname = window.location.hostname;
+      }
+      backendUrl.protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${backendUrl.protocol}//${backendUrl.host}/ws/clinic/${slug}/conversations/${conversationId}/`;
       socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        attempt = 0;
+        refetchConversation();
+      };
 
       socket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-          if (payload?.type === "message") {
+          if (
+            payload?.type === "message" &&
+            String(payload?.conversation_id) === String(conversationId)
+          ) {
             refetchConversation();
           }
         } catch {
@@ -137,8 +152,11 @@ export default function ConversationDetailPage() {
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         if (!isActive) {
+          return;
+        }
+        if (event.code === 4401) {
           return;
         }
         const delay = Math.min(10_000, 1_000 * Math.pow(2, attempt));
