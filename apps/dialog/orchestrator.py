@@ -97,6 +97,9 @@ class DialogOrchestrator:
             if (timezone.now() - previous_inbound.created_at) <= timedelta(minutes=duplicate_window_minutes):
                 suppress_duplicate = True
 
+        if suppress_duplicate and session_state.context.get("slot_suggestions"):
+            suppress_duplicate = False
+
         if suppress_duplicate:
             logger.info(
                 "Suppressing duplicate inbound for conversation %s within %s minutes",

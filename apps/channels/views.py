@@ -225,12 +225,13 @@ def _process_whatsapp_message(clinic: Clinic, msg: Dict[str, Any], metadata: Dic
         return
 
     # Detect language
-    language = _detect_language_from_text(text_body)
+    detected_language = _detect_language_from_text(text_body)
+    language = detected_language or clinic.default_lang or "en"
 
     # Get or create patient
     profile_name = metadata.get("contacts", [{}])[0].get("profile", {}).get("name", "Guest")
 
-    patient, _ = Patient.objects.get_or_create(
+    patient, created = Patient.objects.get_or_create(
         clinic=clinic,
         normalized_phone=phone,
         defaults={
@@ -239,6 +240,12 @@ def _process_whatsapp_message(clinic: Clinic, msg: Dict[str, Any], metadata: Dic
             "language": language,
         },
     )
+
+    if not created:
+        if detected_language is None:
+            language = patient.language or language
+        else:
+            language = detected_language
 
     # Update patient language if detected
     if patient.language != language:
