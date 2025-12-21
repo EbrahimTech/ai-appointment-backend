@@ -764,8 +764,8 @@ class DialogOrchestrator:
                     logger.warning("Failed to create handoff notification: %s", err)
             return AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
 
-        clinic = conversation.clinic
-        services = list(clinic.services.filter(is_active=True).order_by("name"))
+		clinic = conversation.clinic
+		services = self._get_services_for_language(clinic, language)
         if not services:
             self._clear_booking_flow(session_state)
             return "لا توجد خدمات متاحة حالياً." if language == "ar" else "No services are available right now."
@@ -1443,6 +1443,29 @@ class DialogOrchestrator:
         }
         return any(greet in normalized for greet in greetings)
 
+    def _is_gratitude(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        tokens = {
+            "thanks",
+            "thank you",
+            "appreciate",
+            "شكرا",
+            "شكر",
+            "مشكور",
+            "يعطيك العافية",
+            "جزاك الله خير",
+        }
+        return any(token in normalized for token in tokens)
+
+    def _is_booking_complaint(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        if any(token in normalized for token in {"لماذا", "ليش", "كيف"}):
+            if any(token in normalized for token in {"تحجز", "حجز", "موعد"}):
+                return True
+        return False
+
     def _handle_pending_action(
         self,
         *,
@@ -1574,7 +1597,9 @@ class DialogOrchestrator:
         language: str,
         clinic_tz: str,
     ) -> str:
-        time_label, service_label = self._format_appointment_label(appointment, clinic_tz)
+        time_label, service_label = self._format_appointment_label(
+            appointment, clinic_tz, language
+        )
         if tool_name == "cancel_appointment":
             if language == "ar":
                 return f"?? ???? ????? ????? ?????? {time_label} ????? {service_label}? ??? ??? ??????? ?? ?? ???????."
@@ -1586,7 +1611,9 @@ class DialogOrchestrator:
                 dt = datetime.fromisoformat(str(new_start_iso))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=ZoneInfo(clinic_tz or "UTC"))
-                new_label = dt.astimezone(ZoneInfo(clinic_tz or "UTC")).strftime("%A %d %b %I:%M %p")
+                new_label = self._format_datetime_label(
+                    dt.astimezone(ZoneInfo(clinic_tz or "UTC")), language
+                )
             except (TypeError, ValueError):
                 new_label = ""
         if language == "ar":
@@ -1597,14 +1624,66 @@ class DialogOrchestrator:
             return f"Reschedule your appointment from {time_label} to {new_label}? Reply YES to confirm or NO to keep it."
         return f"Reschedule your appointment on {time_label}? Reply YES to confirm or NO to keep it."
 
-    def _format_appointment_label(self, appointment, clinic_tz: str) -> tuple[str, str]:
+    def _format_datetime_label(self, dt: datetime, language: str) -> str:
+        if language != "ar":
+            return dt.strftime("%A %d %b %I:%M %p")
+
+        day_names = [
+            "الاثنين",
+            "الثلاثاء",
+            "الأربعاء",
+            "الخميس",
+            "الجمعة",
+            "السبت",
+            "الأحد",
+        ]
+        month_names = [
+            "يناير",
+            "فبراير",
+            "مارس",
+            "أبريل",
+            "مايو",
+            "يونيو",
+            "يوليو",
+            "أغسطس",
+            "سبتمبر",
+            "أكتوبر",
+            "نوفمبر",
+            "ديسمبر",
+        ]
+        day_name = day_names[dt.weekday()]
+        month_name = month_names[dt.month - 1]
+        hour = dt.hour
+        period = "صباحًا" if hour < 12 else "مساءً"
+        hour12 = hour % 12
+        if hour12 == 0:
+            hour12 = 12
+        return f"{day_name} {dt.day} {month_name} {hour12}:{dt.minute:02d} {period}"
+
+    def _format_service_label(self, service, clinic: Clinic | None, language: str) -> str:
+        if not service:
+            return "الخدمة" if language == "ar" else "service"
+        if language == "ar" and clinic:
+            if getattr(service, "language", None) != "ar":
+                translated = clinic.services.filter(code=service.code, language="ar").first()
+                if translated and translated.name:
+                    return translated.name
+        return service.name or ("الخدمة" if language == "ar" else "service")
+
+    def _format_appointment_label(
+        self, appointment, clinic_tz: str, language: str
+    ) -> tuple[str, str]:
         tz = ZoneInfo(clinic_tz or "UTC")
         start_label = "unknown time"
         if getattr(appointment, "start_at", None):
-            start_label = appointment.start_at.astimezone(tz).strftime("%A %d %b %I:%M %p")
-        service_label = "service"
-        if getattr(appointment, "service", None) and appointment.service:
-            service_label = appointment.service.name
+            start_label = self._format_datetime_label(
+                appointment.start_at.astimezone(tz), language
+            )
+        service_label = self._format_service_label(
+            appointment.service if getattr(appointment, "service", None) else None,
+            appointment.clinic if getattr(appointment, "clinic", None) else None,
+            language,
+        )
         return start_label, service_label
 
     def _format_appointment_choices(self, *, appointments: list, clinic_tz: str, language: str) -> str:
