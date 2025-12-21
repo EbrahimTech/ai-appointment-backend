@@ -163,19 +163,12 @@ class DialogOrchestrator:
                 if language == "ar"
                 else "Hi! How can I help you book an appointment?"
             )
-            ConversationMessage.objects.create(
+            response_text = self._send_outbound_message(
                 conversation=conversation,
-                direction="outbound",
                 language=language,
                 body=response_text,
                 intent="greet",
                 metadata={"auto_reply": True},
-            )
-            enqueue_whatsapp_session_message(
-                clinic_id=conversation.clinic_id,
-                conversation=conversation,
-                language=language,
-                message_body=response_text,
                 idempotency_key=f"greet:{conversation.id}:{inbound_message.id}",
             )
             return response_text, "greet"
@@ -186,19 +179,12 @@ class DialogOrchestrator:
                 if language == "ar"
                 else "You're welcome! Let me know if you need anything else."
             )
-            ConversationMessage.objects.create(
+            response_text = self._send_outbound_message(
                 conversation=conversation,
-                direction="outbound",
                 language=language,
                 body=response_text,
                 intent="clarify",
                 metadata={"auto_reply": True, "reason": "gratitude"},
-            )
-            enqueue_whatsapp_session_message(
-                clinic_id=conversation.clinic_id,
-                conversation=conversation,
-                language=language,
-                message_body=response_text,
                 idempotency_key=f"gratitude:{conversation.id}:{inbound_message.id}",
             )
             return response_text, "clarify"
@@ -209,19 +195,12 @@ class DialogOrchestrator:
                 if language == "ar"
                 else "Would you like to book an appointment now?"
             )
-            ConversationMessage.objects.create(
+            response_text = self._send_outbound_message(
                 conversation=conversation,
-                direction="outbound",
                 language=language,
                 body=response_text,
                 intent="clarify",
                 metadata={"auto_reply": True, "reason": "booking_complaint"},
-            )
-            enqueue_whatsapp_session_message(
-                clinic_id=conversation.clinic_id,
-                conversation=conversation,
-                language=language,
-                message_body=response_text,
                 idempotency_key=f"booking-clarify:{conversation.id}:{inbound_message.id}",
             )
             return response_text, "clarify"
