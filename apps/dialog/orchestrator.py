@@ -122,6 +122,35 @@ class DialogOrchestrator:
                     logger.warning("Failed to create handoff notification: %s", err)
                 return None, "handoff"
 
+        pending_action = session_state.context.get("pending_action")
+        if pending_action:
+            pending_reply = self._handle_pending_action(
+                conversation=conversation,
+                session_state=session_state,
+                body=body,
+                language=language,
+                pending=pending_action,
+            )
+            if pending_reply:
+                response_text, pending_intent = pending_reply
+                ConversationMessage.objects.create(
+                    conversation=conversation,
+                    direction="outbound",
+                    language=language,
+                    body=response_text,
+                    intent=pending_intent,
+                    metadata={"auto_reply": True, "pending_action": True},
+                )
+                if queue_session:
+                    enqueue_whatsapp_session_message(
+                        clinic_id=conversation.clinic_id,
+                        conversation=conversation,
+                        language=language,
+                        message_body=response_text,
+                        idempotency_key=f"{conversation.id}:{inbound_message.id}",
+                    )
+                return response_text, pending_intent
+
         if intent == "greet":
             response_text = (
                 "أهلًا! كيف أقدر أساعدك بحجز موعد؟"
@@ -312,40 +341,71 @@ class DialogOrchestrator:
             self.fsm.apply(conversation, intent, context={"message": body, "is_off_topic": False})
             if intent in {"cancel", "reschedule"} and getattr(settings, "LLM_TOOL_CALLING_ENABLED", False):
                 try:
-                    tool_reply, tool_slots, tool_meta = self.llm_router.answer_with_tools(
+                    plan = self.llm_router.plan_tool_call(
                         clinic=conversation.clinic,
                         language=language,
                         prompt=body,
-                        conversation_id=conversation.id,
+                        conversation=conversation,
                     )
-                    if tool_reply:
-                        if tool_meta and tool_meta.get("action") == "reschedule" and tool_slots:
-                            session_state.context["slot_suggestions"] = [
-                                {
-                                    "start": slot.start.isoformat(),
-                                    "end": slot.end.isoformat(),
-                                    "tentative": slot.tentative,
-                                    "source": slot.source,
-                                }
-                                for slot in tool_slots
-                            ]
-                            session_state.context["slot_offer_prompt"] = tool_reply
-                            if tool_meta.get("service_code"):
-                                session_state.context["slot_service_code"] = tool_meta.get("service_code")
-                            if tool_meta.get("appointment_id"):
-                                session_state.context["reschedule_appointment_id"] = tool_meta.get("appointment_id")
-                            session_state.save(update_fields=["context", "updated_at"])
-                        response_text = tool_reply
-                        queue_session = True
-                    else:
+                    if not plan:
                         response_text = self._handle_terminal_intent(conversation, intent, language)
-                        queue_session = True
+                    elif "reply" in plan:
+                        response_text = str(plan.get("reply") or "")
+                    else:
+                        tool_name = plan.get("tool")
+                        args = plan.get("args") or {}
+                        if tool_name not in {"cancel_appointment", "reschedule_appointment"}:
+                            response_text = self._handle_terminal_intent(conversation, intent, language)
+                        else:
+                            appointment = self.llm_router.resolve_appointment_for_confirmation(
+                                clinic=conversation.clinic,
+                                conversation=conversation,
+                                appointment_id=args.get("appointment_id"),
+                                start_iso=args.get("start_iso"),
+                            )
+                            if not appointment:
+                                response_text = (
+                                    "Please share the date and time of the appointment."
+                                    if language != "ar"
+                                    else "يرجى ذكر تاريخ ووقت الموعد."
+                                )
+                            else:
+                                args["appointment_id"] = appointment.id
+                                if tool_name == "reschedule_appointment" and not args.get("new_start_iso"):
+                                    session_state.context["pending_action"] = {
+                                        "tool": tool_name,
+                                        "args": {"appointment_id": appointment.id},
+                                        "appointment_id": appointment.id,
+                                        "stage": "await_time",
+                                    }
+                                    session_state.save(update_fields=["context", "updated_at"])
+                                    response_text = (
+                                        "What time would you like instead?"
+                                        if language != "ar"
+                                        else "ما الوقت الجديد المناسب؟"
+                                    )
+                                else:
+                                    response_text = self._build_confirmation_prompt(
+                                        tool_name=tool_name,
+                                        appointment=appointment,
+                                        new_start_iso=args.get("new_start_iso"),
+                                        language=language,
+                                        clinic_tz=conversation.clinic.tz,
+                                    )
+                                    session_state.context["pending_action"] = {
+                                        "tool": tool_name,
+                                        "args": args,
+                                        "appointment_id": appointment.id,
+                                        "stage": "confirm",
+                                    }
+                                    session_state.save(update_fields=["context", "updated_at"])
+                    queue_session = True
                 except LLMRouterError as exc:
-                    logger.warning("LLM tool call skipped: %s", exc)
+                    logger.warning("LLM tool plan skipped: %s", exc)
                     response_text = self._handle_terminal_intent(conversation, intent, language)
                     queue_session = True
                 except Exception as exc:  # pragma: no cover - defensive
-                    logger.error("LLM tool call error: %s", exc, exc_info=True)
+                    logger.error("LLM tool plan error: %s", exc, exc_info=True)
                     response_text = self._handle_terminal_intent(conversation, intent, language)
                     queue_session = True
             elif intent == "confirm" and getattr(settings, "LLM_TOOL_BOOKING_ENABLED", False):
@@ -730,3 +790,181 @@ class DialogOrchestrator:
             "مساء الخير",
         }
         return any(greet in normalized for greet in greetings)
+
+    def _handle_pending_action(
+        self,
+        *,
+        conversation: Conversation,
+        session_state: SessionState,
+        body: str,
+        language: str,
+        pending: dict,
+    ) -> tuple[str, str] | None:
+        stage = pending.get("stage", "confirm")
+        tool_name = pending.get("tool")
+        args = pending.get("args") or {}
+        normalized = normalize_text(body)
+        raw = body.strip().lower()
+
+        if stage == "confirm":
+            if self._is_negative_reply(normalized, raw):
+                session_state.context.pop("pending_action", None)
+                session_state.save(update_fields=["context", "updated_at"])
+                reply = "Okay, I won't make that change. How else can I help you?"
+                if language == "ar":
+                    reply = "حسنًا، لن أقوم بالتغيير. كيف يمكنني مساعدتك؟"
+                return reply, "clarify"
+
+            if not self._is_affirmative_reply(normalized, raw):
+                reply = "Please reply with yes or no to confirm."
+                if language == "ar":
+                    reply = "يرجى الرد بنعم أو لا للتأكيد."
+                return reply, "clarify"
+
+            tool_reply, tool_slots, tool_meta = self.llm_router.execute_tool_call(
+                clinic=conversation.clinic,
+                language=language,
+                prompt=body,
+                conversation_id=conversation.id,
+                tool_name=tool_name,
+                args=args,
+                conversation=conversation,
+            )
+            session_state.context.pop("pending_action", None)
+
+            if tool_meta and tool_meta.get("action") == "reschedule" and tool_slots:
+                session_state.context["slot_suggestions"] = [
+                    {
+                        "start": slot.start.isoformat(),
+                        "end": slot.end.isoformat(),
+                        "tentative": slot.tentative,
+                        "source": slot.source,
+                    }
+                    for slot in tool_slots
+                ]
+                session_state.context["slot_offer_prompt"] = tool_reply
+                if tool_meta.get("service_code"):
+                    session_state.context["slot_service_code"] = tool_meta.get("service_code")
+                if tool_meta.get("appointment_id"):
+                    session_state.context["reschedule_appointment_id"] = tool_meta.get("appointment_id")
+                session_state.save(update_fields=["context", "updated_at"])
+                return tool_reply, "reschedule"
+
+            if tool_name == "reschedule_appointment" and not tool_slots and tool_meta is None:
+                appointment_id = pending.get("appointment_id") or args.get("appointment_id")
+                if appointment_id:
+                    session_state.context["pending_action"] = {
+                        "tool": tool_name,
+                        "args": {"appointment_id": appointment_id},
+                        "appointment_id": appointment_id,
+                        "stage": "await_time",
+                    }
+                    session_state.save(update_fields=["context", "updated_at"])
+                return tool_reply, "reschedule"
+
+            session_state.save(update_fields=["context", "updated_at"])
+            return tool_reply or "", "confirm"
+
+        if stage == "await_time":
+            appointment_id = pending.get("appointment_id") or args.get("appointment_id")
+            if not appointment_id:
+                session_state.context.pop("pending_action", None)
+                session_state.save(update_fields=["context", "updated_at"])
+                reply = "Please share the date and time you prefer."
+                if language == "ar":
+                    reply = "يرجى ذكر التاريخ والوقت المناسب."
+                return reply, "reschedule"
+
+            tool_reply, tool_slots, tool_meta = self.llm_router.execute_tool_call(
+                clinic=conversation.clinic,
+                language=language,
+                prompt=body,
+                conversation_id=conversation.id,
+                tool_name="reschedule_appointment",
+                args={"appointment_id": appointment_id},
+                conversation=conversation,
+            )
+            if tool_meta and tool_meta.get("action") == "reschedule" and tool_slots:
+                session_state.context["slot_suggestions"] = [
+                    {
+                        "start": slot.start.isoformat(),
+                        "end": slot.end.isoformat(),
+                        "tentative": slot.tentative,
+                        "source": slot.source,
+                    }
+                    for slot in tool_slots
+                ]
+                session_state.context["slot_offer_prompt"] = tool_reply
+                if tool_meta.get("service_code"):
+                    session_state.context["slot_service_code"] = tool_meta.get("service_code")
+                session_state.context["reschedule_appointment_id"] = appointment_id
+                session_state.context.pop("pending_action", None)
+                session_state.save(update_fields=["context", "updated_at"])
+                return tool_reply, "reschedule"
+
+            if tool_meta and tool_meta.get("action") == "rescheduled":
+                session_state.context.pop("pending_action", None)
+                session_state.save(update_fields=["context", "updated_at"])
+                return tool_reply, "reschedule"
+
+            session_state.context["pending_action"] = pending
+            session_state.save(update_fields=["context", "updated_at"])
+            return tool_reply or "", "reschedule"
+
+        return None
+
+    def _build_confirmation_prompt(
+        self,
+        *,
+        tool_name: str,
+        appointment,
+        new_start_iso: str | None,
+        language: str,
+        clinic_tz: str,
+    ) -> str:
+        time_label, service_label = self._format_appointment_label(appointment, clinic_tz)
+        if tool_name == "cancel_appointment":
+            if language == "ar":
+                return f"?? ???? ????? ????? ?????? {time_label} ????? {service_label}? ??? ??? ??????? ?? ?? ???????."
+            return f"Cancel your appointment on {time_label} for {service_label}? Reply YES to confirm or NO to keep it."
+
+        new_label = ""
+        if new_start_iso:
+            try:
+                dt = datetime.fromisoformat(str(new_start_iso))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=ZoneInfo(clinic_tz or "UTC"))
+                new_label = dt.astimezone(ZoneInfo(clinic_tz or "UTC")).strftime("%A %d %b %I:%M %p")
+            except (TypeError, ValueError):
+                new_label = ""
+        if language == "ar":
+            if new_label:
+                return f"?? ???? ????? ????? ?? {time_label} ??? {new_label}? ??? ??? ??????? ?? ?? ???????."
+            return f"?? ???? ????? ????? ?????? {time_label}? ??? ??? ??????? ?? ?? ???????."
+        if new_label:
+            return f"Reschedule your appointment from {time_label} to {new_label}? Reply YES to confirm or NO to keep it."
+        return f"Reschedule your appointment on {time_label}? Reply YES to confirm or NO to keep it."
+
+    def _format_appointment_label(self, appointment, clinic_tz: str) -> tuple[str, str]:
+        tz = ZoneInfo(clinic_tz or "UTC")
+        start_label = "unknown time"
+        if getattr(appointment, "start_at", None):
+            start_label = appointment.start_at.astimezone(tz).strftime("%A %d %b %I:%M %p")
+        service_label = "service"
+        if getattr(appointment, "service", None) and appointment.service:
+            service_label = appointment.service.name
+        return start_label, service_label
+
+    def _is_affirmative_reply(self, normalized: str, raw: str) -> bool:
+        tokens = {"yes", "y", "ok", "okay", "confirm", "sure", "agree"}
+        if any(token in normalized for token in tokens):
+            return True
+        arabic_tokens = {"???", "????", "????", "?????", "????", "?????", "????", "??"}
+        return any(token in raw for token in arabic_tokens)
+
+    def _is_negative_reply(self, normalized: str, raw: str) -> bool:
+        tokens = {"no", "nah", "nope", "cancel", "stop", "don't"}
+        if any(token in normalized for token in tokens):
+            return True
+        arabic_tokens = {"??", "??", "??", "??? ?????", "?? ????", "??????", "???", "?????", "?????"}
+        return any(token in raw for token in arabic_tokens)
