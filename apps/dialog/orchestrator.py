@@ -208,6 +208,32 @@ class DialogOrchestrator:
                 )
                 return response_text, pending_intent
 
+        if general_inquiry:
+            try:
+                response_text = self.llm_router.answer(
+                    clinic=conversation.clinic,
+                    language=language,
+                    prompt=body,
+                    conversation_id=conversation.id,
+                )
+            except LLMRouterError as exc:
+                logger.warning("LLM general inquiry skipped: %s", exc)
+                response_text = (
+                    "أكيد، تفضل سؤالك. أقدر أساعدك بالحجز أو الاستفسارات عن خدمات العيادة."
+                    if language == "ar"
+                    else "Sure—what would you like to know? I can help with bookings or clinic info."
+                )
+            response_text = self._send_outbound_message(
+                conversation=conversation,
+                language=language,
+                body=response_text,
+                intent="clarify",
+                metadata={"auto_reply": True, "reason": "general_inquiry"},
+                idempotency_key=f"general:{conversation.id}:{inbound_message.id}",
+                queue_session=queue_session,
+            )
+            return response_text, "clarify"
+
         if intent == "greet":
             response_text = (
                 "أهلًا! كيف أقدر أساعدك بحجز موعد؟"
