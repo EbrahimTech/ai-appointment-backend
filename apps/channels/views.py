@@ -26,7 +26,8 @@ from apps.channels.services import (
     mark_outbox_delivered,
 )
 from apps.common.utils import minimal_ok
-from apps.conversations.models import Conversation
+from apps.conversations.models import Conversation, SessionState
+from apps.dialog.models import DialogTurnLog
 from apps.dialog.orchestrator import DialogOrchestrator
 from apps.patients.models import Patient
 from apps.patients.utils import normalize_phone_number
@@ -89,6 +90,47 @@ def _ensure_conversation(clinic: Clinic, phone: str, lead_source: str) -> Conver
         },
     )
     return conversation
+
+
+def _log_dialog_turn(
+    *,
+    conversation: Conversation,
+    response_text: str | None,
+    intent: str,
+) -> None:
+    try:
+        session_state = SessionState.objects.filter(conversation=conversation).first()
+        context = session_state.context if session_state else {}
+        decision = context.get("decision") or {}
+        llm_intent = context.get("llm_intent") or {}
+        llm_trace = context.get("llm_trace") or {}
+        inbound_msg = (
+            conversation.messages.filter(direction="inbound").order_by("-created_at").first()
+        )
+        DialogTurnLog.objects.create(
+            conversation=conversation,
+            message=inbound_msg,
+            intent_predicted=str(llm_intent.get("intent") or intent or ""),
+            intent_confidence=float(llm_intent.get("confidence") or 0),
+            state=str(decision.get("state") or ""),
+            handoff_reason=str(context.get("handoff_reason") or ""),
+            validator_fail_reason=str(context.get("validator_fail_reason") or ""),
+            llm_calls=int(llm_trace.get("calls") or 0),
+            llm_tokens=int(llm_trace.get("tokens") or 0),
+            metadata={
+                "intent": intent,
+                "decision": decision,
+                "slots": decision.get("slots") if isinstance(decision, dict) else None,
+                "missing_slots": decision.get("missing_slots") if isinstance(decision, dict) else None,
+                "response_preview": (response_text or "")[:200],
+                "llm_intent": llm_intent,
+                "llm_trace": llm_trace,
+                "booking_flow": context.get("booking_flow"),
+                "action_flow": context.get("action_flow"),
+            },
+        )
+    except Exception as exc:  # pragma: no cover - logging should not break flow
+        logger.warning("Failed to log dialog turn: %s", exc)
 
 
 @csrf_exempt
@@ -267,6 +309,7 @@ def _process_whatsapp_message(clinic: Clinic, msg: Dict[str, Any], metadata: Dic
         )
 
         logger.info(f"Conversation {conversation.id} - Intent: {intent}, Response: {response_text[:100] if response_text else 'None'}")
+        _log_dialog_turn(conversation=conversation, response_text=response_text, intent=intent)
 
         # Send welcome message for booking intent
         if intent == "book" and response_text:
@@ -359,6 +402,7 @@ def _handle_legacy_webhook(payload: Dict[str, Any]) -> JsonResponse:
             body=message.get("body", ""),
             language=_get_language(message),
         )
+        _log_dialog_turn(conversation=conversation, response_text=response_text, intent=intent)
 
         if intent == "book" and response_text:
             enqueue_whatsapp_hsm(

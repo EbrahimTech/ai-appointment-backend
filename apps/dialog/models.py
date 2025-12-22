@@ -37,3 +37,29 @@ class TopicCorridorEvent(TimeStampedModel):
     violation_count = models.PositiveIntegerField(default=0)
     action = models.CharField(max_length=50)
     notes = models.TextField(blank=True)
+
+
+class DialogTurnLog(TimeStampedModel):
+    """Structured log per inbound turn for debugging and analysis."""
+
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="turn_logs"
+    )
+    message = models.ForeignKey(
+        ConversationMessage,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="turn_logs",
+    )
+    intent_predicted = models.CharField(max_length=100, blank=True)
+    intent_confidence = models.FloatField(default=0)
+    state = models.CharField(max_length=50, blank=True)
+    handoff_reason = models.CharField(max_length=100, blank=True)
+    validator_fail_reason = models.CharField(max_length=100, blank=True)
+    llm_calls = models.PositiveIntegerField(default=0)
+    llm_tokens = models.PositiveIntegerField(default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
