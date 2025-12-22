@@ -809,6 +809,22 @@ class DialogOrchestrator:
             )
         return clean_body
 
+    def _reset_llm_trace(self, session_state: SessionState) -> None:
+        session_state.context["llm_trace"] = {
+            "calls": 0,
+            "tokens": 0,
+            "calls_detail": [],
+        }
+        session_state.save(update_fields=["context", "updated_at"])
+
+    def _set_llm_trace_inbound(self, session_state: SessionState, inbound_id: int) -> None:
+        trace = session_state.context.get("llm_trace")
+        if not isinstance(trace, dict):
+            trace = {"calls": 0, "tokens": 0, "calls_detail": []}
+        trace["inbound_id"] = inbound_id
+        session_state.context["llm_trace"] = trace
+        session_state.save(update_fields=["context", "updated_at"])
+
     def _sanitize_response(self, conversation: Conversation, text: str, language: str) -> str:
         cleaned = (text or "").strip()
         if not cleaned:
@@ -1003,6 +1019,7 @@ class DialogOrchestrator:
                     state=state,
                     slots=slots,
                     missing_slots=missing,
+                    conversation_id=conversation.id,
                 )
                 if decision:
                     min_conf = float(getattr(settings, "LLM_DECISION_CONF_THRESHOLD", 0.5))
