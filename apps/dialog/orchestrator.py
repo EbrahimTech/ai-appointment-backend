@@ -251,6 +251,12 @@ class DialogOrchestrator:
             return response_text, "greet"
 
         if intent == "clarify" and self._is_gratitude(normalized):
+            if session_state.context.get("booking_flow"):
+                self._clear_booking_flow(session_state)
+                session_state.context.pop("slot_suggestions", None)
+                session_state.context.pop("slot_offer_prompt", None)
+                session_state.context.pop("slot_service_code", None)
+                session_state.save(update_fields=["context", "updated_at"])
             response_text = (
                 "العفو! إذا احتجت أي شيء آخر أخبرني."
                 if language == "ar"
@@ -310,12 +316,13 @@ class DialogOrchestrator:
 
         booking_flow = session_state.context.get("booking_flow") or {}
         should_handle_booking_flow = False
-        if intent == "book":
-            should_handle_booking_flow = True
-        elif self._asks_for_slots(body) and intent not in {"confirm", "cancel", "reschedule"}:
-            should_handle_booking_flow = True
-        elif booking_flow and booking_flow.get("state") not in {"BOOKED", "DONE"} and intent not in {"confirm", "cancel", "reschedule"}:
-            should_handle_booking_flow = True
+        if not general_inquiry:
+            if intent == "book" and (explicit_booking or booking_flow):
+                should_handle_booking_flow = True
+            elif self._asks_for_slots(body) and intent not in {"confirm", "cancel", "reschedule"}:
+                should_handle_booking_flow = True
+            elif booking_flow and booking_flow.get("state") not in {"BOOKED", "DONE"} and intent not in {"confirm", "cancel", "reschedule"}:
+                should_handle_booking_flow = True
 
         if should_handle_booking_flow:
             response_text = self._handle_booking_flow(
@@ -356,11 +363,14 @@ class DialogOrchestrator:
             return response_text, action_intent
 
         # Track repeated unproductive intents to auto-handoff
-        productive_intents = {"book", "confirm", "cancel", "reschedule", "pricing", "services", "xray", "policy"}
+        productive_intents = {"book", "confirm", "cancel", "reschedule", "pricing", "services", "xray", "policy", "info"}
         repeat_threshold = int(getattr(settings, "WHATSAPP_REPEAT_HANDOFF_THRESHOLD", 3))
         repeat_window_minutes = int(
             getattr(settings, "WHATSAPP_REPEAT_RESET_MINUTES", 30)
         )
+        repeat_intent = intent
+        if general_inquiry or handoff_question:
+            repeat_intent = "info"
 
         last_seen_iso = repeat_tracker.get("last_seen")
         try:
@@ -374,13 +384,13 @@ class DialogOrchestrator:
         if last_seen:
             within_window = (now - last_seen) <= timedelta(minutes=repeat_window_minutes)
 
-        if intent in productive_intents:
-            repeat_tracker = {"intent": intent, "count": 0, "last_seen": now.isoformat()}
+        if repeat_intent in productive_intents:
+            repeat_tracker = {"intent": repeat_intent, "count": 0, "last_seen": now.isoformat()}
         else:
-            if repeat_tracker.get("intent") == intent and within_window:
+            if repeat_tracker.get("intent") == repeat_intent and within_window:
                 repeat_tracker["count"] += 1
             else:
-                repeat_tracker = {"intent": intent, "count": 1, "last_seen": now.isoformat()}
+                repeat_tracker = {"intent": repeat_intent, "count": 1, "last_seen": now.isoformat()}
 
         repeat_tracker["last_seen"] = now.isoformat()
 
@@ -393,8 +403,10 @@ class DialogOrchestrator:
         ):
             conversation.handoff_required = True
             conversation.save(update_fields=["handoff_required", "updated_at"])
+            session_state.context["handoff_reason"] = "repeat"
+            session_state.save(update_fields=["context", "updated_at"])
             # reset repeat tracker to avoid immediate retrigger after manual handoff clear
-            session_state.context["repeat_tracker"] = {"intent": intent, "count": 0, "last_seen": now.isoformat()}
+            session_state.context["repeat_tracker"] = {"intent": repeat_intent, "count": 0, "last_seen": now.isoformat()}
             session_state.save(update_fields=["context", "updated_at"])
             try:
                 from apps.accounts.notifications import notify_handoff
