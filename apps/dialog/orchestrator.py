@@ -1442,6 +1442,50 @@ class DialogOrchestrator:
             return "أي فترة تناسبك؟ (صباح/ظهر/مساء/أي وقت)"
         return "Which time window works for you? (morning/afternoon/evening/any)"
 
+    def _prompt_for_state(
+        self,
+        *,
+        session_state: SessionState,
+        state: str,
+        language: str,
+        services: list,
+    ) -> str:
+        if state == "ASK_REASON":
+            prompt = self._format_reason_prompt(language)
+            return self._select_question_variant(
+                session_state=session_state,
+                state=state,
+                language=language,
+                fallback=prompt,
+            )
+        if state == "ASK_SERVICE":
+            prompt = self._format_service_prompt(language, services)
+            services_hint = ", ".join([svc.name for svc in services[:4] if svc.name])
+            return self._select_question_variant(
+                session_state=session_state,
+                state=state,
+                language=language,
+                fallback=prompt,
+                services_hint=services_hint,
+            )
+        if state == "ASK_DATE":
+            prompt = self._format_date_prompt(language)
+            return self._select_question_variant(
+                session_state=session_state,
+                state=state,
+                language=language,
+                fallback=prompt,
+            )
+        if state == "ASK_TIME_WINDOW":
+            prompt = self._format_time_window_prompt(language)
+            return self._select_question_variant(
+                session_state=session_state,
+                state=state,
+                language=language,
+                fallback=prompt,
+            )
+        return ""
+
     def _wants_new_time(self, text: str) -> bool:
         lowered = text.lower()
         cues = {"وقت آخر", "موعد آخر", "تغيير", "غير مناسب", "another time", "change"}
