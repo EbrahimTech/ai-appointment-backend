@@ -54,8 +54,12 @@ class DialogOrchestrator:
             language = conversation.patient.language
         normalized = normalize_text(body)
         intent = "greet" if self._is_greeting(normalized) else detect_intent(normalized)
+        general_inquiry = self._is_general_inquiry(normalized)
+        explicit_booking = self._is_explicit_booking_request(normalized)
+        handoff_question = self._is_handoff_question(normalized)
+        resume_bot = self._wants_bot_resume(normalized)
         # LLM intent fallback (structured) to better understand Arabic/free-form requests
-        if intent == "clarify" and getattr(settings, "LLM_INTENT_ENABLED", True):
+        if intent == "clarify" and getattr(settings, "LLM_INTENT_ENABLED", True) and not general_inquiry:
             try:
                 intent_result = self.llm_router.classify_intent(
                     clinic=conversation.clinic,
@@ -74,6 +78,10 @@ class DialogOrchestrator:
                 logger.warning("LLM intent fallback skipped: %s", exc)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error("LLM intent fallback error: %s", exc, exc_info=True)
+        if general_inquiry:
+            intent = "clarify"
+        elif intent == "book" and not explicit_booking and not self._asks_for_slots(body):
+            intent = "clarify"
         previous_inbound = (
             conversation.messages.filter(direction="inbound").order_by("-created_at").first()
         )
@@ -88,6 +96,14 @@ class DialogOrchestrator:
         )
 
         session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
+        if general_inquiry:
+            self._clear_booking_flow(session_state)
+            self._clear_action_flow(session_state)
+            session_state.context.pop("slot_suggestions", None)
+            session_state.context.pop("slot_offer_prompt", None)
+            session_state.context.pop("slot_service_code", None)
+            session_state.context.pop("reschedule_appointment_id", None)
+            session_state.save(update_fields=["context", "updated_at"])
         response_text: str | None = None
         queue_session = True
         suppress_duplicate = False
@@ -134,6 +150,41 @@ class DialogOrchestrator:
                 except Exception as err:  # pragma: no cover - best effort logging
                     logger.warning("Failed to create handoff notification: %s", err)
                 return None, "handoff"
+
+        if conversation.handoff_required:
+            if resume_bot:
+                conversation.handoff_required = False
+                conversation.save(update_fields=["handoff_required", "updated_at"])
+                session_state.context.pop("handoff_reason", None)
+                session_state.save(update_fields=["context", "updated_at"])
+                response_text = (
+                    "تم تفعيل المساعد مرة أخرى. كيف أقدر أساعدك؟"
+                    if language == "ar"
+                    else "Assistant is active again. How can I help you?"
+                )
+                response_text = self._send_outbound_message(
+                    conversation=conversation,
+                    language=language,
+                    body=response_text,
+                    intent="clarify",
+                    metadata={"auto_reply": True, "reason": "resume_bot"},
+                    idempotency_key=f"resume:{conversation.id}:{inbound_message.id}",
+                    queue_session=queue_session,
+                )
+                return response_text, "clarify"
+            if handoff_question:
+                response_text = self._handoff_explanation(session_state, language)
+                response_text = self._send_outbound_message(
+                    conversation=conversation,
+                    language=language,
+                    body=response_text,
+                    intent="handoff",
+                    metadata={"auto_reply": True, "reason": "handoff_explain"},
+                    idempotency_key=f"handoff-explain:{conversation.id}:{inbound_message.id}",
+                    queue_session=queue_session,
+                )
+                return response_text, "handoff"
+            return None, "handoff"
 
         pending_action = session_state.context.get("pending_action")
         if pending_action:
