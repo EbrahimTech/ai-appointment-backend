@@ -86,6 +86,58 @@ class LLMRouter:
         self.cost_per_request = Decimal(str(getattr(settings, "LLM_COST_PER_REQUEST", 0.002)))
         self.fallback_template_name = getattr(settings, "LLM_FALLBACK_TEMPLATE_NAME", "session_clarify")
 
+    def _get_session_state(self, conversation_id: int | None) -> SessionState | None:
+        if not conversation_id:
+            return None
+        conversation = Conversation.objects.filter(pk=conversation_id).first()
+        if not conversation:
+            return None
+        session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
+        return session_state
+
+    def _ensure_llm_trace(self, session_state: SessionState) -> dict:
+        trace = session_state.context.get("llm_trace")
+        if not isinstance(trace, dict):
+            trace = {}
+        trace.setdefault("calls", 0)
+        trace.setdefault("tokens", 0)
+        trace.setdefault("calls_detail", [])
+        session_state.context["llm_trace"] = trace
+        return trace
+
+    def _check_llm_call_budget(self, session_state: SessionState) -> None:
+        trace = self._ensure_llm_trace(session_state)
+        max_calls = int(getattr(settings, "LLM_MAX_CALLS_PER_MESSAGE", 2))
+        if int(trace.get("calls", 0)) >= max_calls:
+            raise LLMRouterError("llm_call_limit")
+
+    def _record_llm_usage(
+        self,
+        *,
+        session_state: SessionState,
+        label: str,
+        model: str,
+        usage: dict | None,
+        prompt: str,
+    ) -> None:
+        trace = self._ensure_llm_trace(session_state)
+        total_tokens = 0
+        if isinstance(usage, dict):
+            total_tokens = int(usage.get("total_tokens") or usage.get("completion_tokens") or 0)
+        if total_tokens <= 0:
+            total_tokens = max(1, int(len(prompt or "") / max(self.chars_per_token, 1)))
+        trace["calls"] = int(trace.get("calls", 0)) + 1
+        trace["tokens"] = int(trace.get("tokens", 0)) + total_tokens
+        trace["calls_detail"].append(
+            {
+                "label": label,
+                "model": model,
+                "tokens": total_tokens,
+            }
+        )
+        session_state.context["llm_trace"] = trace
+        session_state.save(update_fields=["context", "updated_at"])
+
     def answer(
         self,
         *,
@@ -107,6 +159,9 @@ class LLMRouter:
         if not self._budget_available():
             self._mark_economy_mode(session_state, conversation)
             raise LLMRouterError("llm_budget_exhausted")
+
+        if session_state:
+            self._check_llm_call_budget(session_state)
 
         chunks = self._retrieve_chunks(clinic, language)
         context_text, grounded_chunks = self._build_context(chunks)
@@ -172,6 +227,14 @@ class LLMRouter:
 
         payload = response.json()
         content = payload["choices"][0]["message"]["content"].strip()
+        if session_state:
+            self._record_llm_usage(
+                session_state=session_state,
+                label="answer",
+                model=self.model,
+                usage=payload.get("usage") if isinstance(payload, dict) else None,
+                prompt=prompt,
+            )
 
         llm_log = LLMRequestLog.objects.create(
             provider=LLMProvider.DEEPSEEK,
@@ -500,6 +563,7 @@ class LLMRouter:
         clinic: Clinic,
         language: str,
         prompt: str,
+        conversation_id: int | None = None,
     ) -> dict | None:
         """
         Lightweight intent/slot extraction with strict JSON output.
@@ -529,30 +593,19 @@ class LLMRouter:
             },
         ]
 
-        try:
-            response = requests.post(
-                f"{self.api_base}/v1/chat/completions",
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "temperature": 0,
-                    "max_tokens": 200,
-                },
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                timeout=getattr(settings, "LLM_TIMEOUT_SECONDS", 15),
-            )
-        except requests.Timeout as exc:  # pragma: no cover - network path
-            raise LLMRouterError("llm_timeout") from exc
+        if not self._budget_available():
+            self._mark_economy_mode(self._get_session_state(conversation_id), None)
+            raise LLMRouterError("llm_budget_exhausted")
 
-        if response.status_code >= 400:
-            logger.error("DeepSeek intent error %s: %s", response.status_code, response.text)
-            raise LLMRouterError("llm_provider_error")
-
-        payload = response.json()
-        content = payload["choices"][0]["message"]["content"].strip()
+        content = self._send_llm_request(
+            messages=messages,
+            prompt=prompt,
+            model=model,
+            max_tokens=200,
+            temperature=0,
+            conversation_id=conversation_id,
+            call_label="intent",
+        )
 
         try:
             parsed = json.loads(content)
@@ -581,6 +634,7 @@ class LLMRouter:
         state: str,
         slots: dict,
         missing_slots: list[str],
+        conversation_id: int | None = None,
     ) -> dict | None:
         """Return a structured booking decision JSON or None on failure."""
         if not self.api_key:
@@ -620,6 +674,8 @@ class LLMRouter:
             model=getattr(settings, "LLM_DECISION_MODEL", self.model),
             max_tokens=220,
             temperature=0.2,
+            conversation_id=conversation_id,
+            call_label="decision",
         )
         try:
             parsed = json.loads(content)
