@@ -1677,6 +1677,124 @@ class DialogOrchestrator:
                 return True
         return False
 
+    def _is_general_inquiry(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        cues = {
+            "لدي سؤال",
+            "عندي سؤال",
+            "سؤال",
+            "استفسار",
+            "عندي استفسار",
+            "ممكن سؤال",
+            "ممكن استفسار",
+            "ابغى استفسار",
+            "ابي استفسار",
+            "ايش تعمل",
+            "اش تعمل",
+            "ماذا تعمل",
+            "من انت",
+            "ما عملك",
+            "ما دورك",
+            "ما وظيفتك",
+            "وش تسوي",
+            "كيف تعمل",
+            "كيف تشتغل",
+            "كيف احجز",
+            "طريقة الحجز",
+            "what do you do",
+            "what can you do",
+            "i have a question",
+            "help",
+        }
+        return any(cue in normalized for cue in cues)
+
+    def _is_explicit_booking_request(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        cues = {
+            "حجز",
+            "احجز",
+            "حجز موعد",
+            "موعد",
+            "مواعيد",
+            "ابي موعد",
+            "ابغى موعد",
+            "اريد موعد",
+            "اريد حجز",
+            "ابي احجز",
+            "احجزلي",
+            "book",
+            "booking",
+            "appointment",
+            "schedule",
+        }
+        return any(cue in normalized for cue in cues)
+
+    def _is_handoff_question(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        cues = {
+            "لماذا حولتني",
+            "ليش حولتني",
+            "ليش التحويل",
+            "لماذا التحويل",
+            "سبب التحويل",
+            "ليش حولتني لخدمة العملاء",
+            "why did you transfer",
+            "why handoff",
+            "why support",
+        }
+        return any(cue in normalized for cue in cues)
+
+    def _wants_bot_resume(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        cues = {
+            "متابعة مع البوت",
+            "اكمل مع البوت",
+            "كمل مع البوت",
+            "ارجع البوت",
+            "رجع البوت",
+            "اريد البوت",
+            "back to bot",
+            "resume bot",
+        }
+        return any(cue in normalized for cue in cues)
+
+    def _handoff_explanation(self, session_state: SessionState, language: str) -> str:
+        reason = (session_state.context.get("handoff_reason") or "").lower()
+        if language == "ar":
+            if reason == "repeat":
+                return (
+                    "حوّلتك لخدمة العملاء لأن الرسائل تكررت بدون تقدم واضح. "
+                    "إذا تريد متابعة معي اكتب: متابعة مع البوت."
+                )
+            if reason.startswith("llm_"):
+                return (
+                    "واجهتني مشكلة مؤقتة في الرد. "
+                    "حوّلتك لخدمة العملاء مؤقتًا. "
+                    "إذا تريد متابعة معي اكتب: متابعة مع البوت."
+                )
+            return (
+                "حوّلتك لخدمة العملاء لأن الطلب غير واضح. "
+                "إذا تريد متابعة معي اكتب: متابعة مع البوت."
+            )
+        if reason == "repeat":
+            return (
+                "I routed you to support because the request kept repeating without progress. "
+                "If you want to continue with me, reply: back to bot."
+            )
+        if reason.startswith("llm_"):
+            return (
+                "I ran into a temporary issue. You were routed to support. "
+                "If you want to continue with me, reply: back to bot."
+            )
+        return (
+            "I routed you to support because the request wasn't clear. "
+            "If you want to continue with me, reply: back to bot."
+        )
+
     def _handle_pending_action(
         self,
         *,
