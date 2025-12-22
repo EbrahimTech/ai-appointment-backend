@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import date, datetime, time, timedelta
+from functools import lru_cache
+from pathlib import Path
 from typing import Tuple
 
 from django.conf import settings
@@ -1352,6 +1355,44 @@ class DialogOrchestrator:
             if any(token in lowered for token in tokens):
                 return code
         return None
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _load_question_variants() -> dict:
+        path = Path(__file__).resolve().parent / "question_variants.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to load question variants: %s", exc)
+            return {}
+
+    def _select_question_variant(
+        self,
+        *,
+        session_state: SessionState,
+        state: str,
+        language: str,
+        fallback: str,
+        services_hint: str = "",
+    ) -> str:
+        variants = self._load_question_variants()
+        lang_key = "ar" if (language or "").lower().startswith("ar") else "en"
+        choices = variants.get(state, {}).get(lang_key) or []
+        if not choices:
+            return fallback
+        index_map = session_state.context.get("question_variant_index")
+        if not isinstance(index_map, dict):
+            index_map = {}
+        idx = int(index_map.get(state, 0))
+        prompt = choices[idx % len(choices)]
+        index_map[state] = idx + 1
+        session_state.context["question_variant_index"] = index_map
+        session_state.save(update_fields=["context", "updated_at"])
+        if "{services}" in prompt:
+            prompt = prompt.replace("{services}", services_hint or "")
+        return prompt
 
     def _format_reason_prompt(self, language: str) -> str:
         if language == "ar":
