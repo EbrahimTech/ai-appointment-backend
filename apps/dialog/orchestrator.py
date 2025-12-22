@@ -745,24 +745,21 @@ class DialogOrchestrator:
             except LLMRouterError as exc:
                 error_code = str(exc)
                 logger.warning("LLM fallback (%s): %s", error_code, exc)
-                if error_code in {"llm_budget_exhausted", "rag_context_missing", "llm_timeout", "llm_latency_exceeded", "llm_provider_error"}:
-                    response_text = (
-                        AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
-                    )
-                    queue_session = True
-                else:
-                    response_text = (
-                        AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
-                    )
-                    if not conversation.handoff_required:
-                        conversation.handoff_required = True
-                        conversation.save(update_fields=["handoff_required", "updated_at"])
-                        try:
-                            from apps.accounts.notifications import notify_handoff
+                response_text = (
+                    AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+                )
+                queue_session = True
+                if not conversation.handoff_required:
+                    conversation.handoff_required = True
+                    conversation.save(update_fields=["handoff_required", "updated_at"])
+                    session_state.context["handoff_reason"] = error_code
+                    session_state.save(update_fields=["context", "updated_at"])
+                    try:
+                        from apps.accounts.notifications import notify_handoff
 
-                            notify_handoff(conversation)
-                        except Exception as err:  # pragma: no cover - best effort logging
-                            logger.warning("Failed to create handoff notification: %s", err)
+                        notify_handoff(conversation)
+                    except Exception as err:  # pragma: no cover - best effort logging
+                        logger.warning("Failed to create handoff notification: %s", err)
 
         if response_text:
             response_text = self._send_outbound_message(
