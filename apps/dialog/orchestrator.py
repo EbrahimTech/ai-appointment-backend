@@ -749,7 +749,8 @@ class DialogOrchestrator:
                     AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
                 )
                 queue_session = True
-                if not conversation.handoff_required:
+                should_handoff = intent not in {"clarify", "greet"}
+                if should_handoff and not conversation.handoff_required:
                     conversation.handoff_required = True
                     conversation.save(update_fields=["handoff_required", "updated_at"])
                     session_state.context["handoff_reason"] = error_code
@@ -1693,6 +1694,11 @@ class DialogOrchestrator:
             "ايش تعمل",
             "اش تعمل",
             "ماذا تعمل",
+            "ماذا يمكنك القيام به",
+            "ما الذي يمكنك القيام به",
+            "ما الذي تقدر عليه",
+            "وش تقدر تسوي",
+            "شو بتقدر تعمل",
             "من انت",
             "ما عملك",
             "ما دورك",
