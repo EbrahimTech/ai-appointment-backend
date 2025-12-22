@@ -901,6 +901,37 @@ class DialogOrchestrator:
                 self.fsm.apply(conversation, "slot_proposed", context={"message": body})
                 state = "SHOW_SLOTS"
 
+        if (
+            prompt
+            and state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}
+            and getattr(settings, "LLM_DECISION_JSON_ENABLED", False)
+        ):
+            try:
+                decision = self.llm_router.plan_booking_decision(
+                    clinic=clinic,
+                    language=language,
+                    prompt=body,
+                    state=state,
+                    slots=slots,
+                    missing_slots=missing,
+                )
+                if decision:
+                    min_conf = float(getattr(settings, "LLM_DECISION_CONF_THRESHOLD", 0.5))
+                    confidence = float(decision.get("confidence", 0))
+                    if (
+                        confidence >= min_conf
+                        and decision.get("state") == state
+                        and decision.get("next_question")
+                    ):
+                        prompt = decision.get("next_question")
+                        decision_missing = decision.get("missing_slots") or []
+                        if decision_missing and all(item in missing for item in decision_missing):
+                            missing = decision_missing
+            except LLMRouterError as exc:
+                logger.warning("LLM booking decision skipped: %s", exc)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("LLM booking decision error: %s", exc, exc_info=True)
+
         if state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}:
             session_state.context.pop("slot_suggestions", None)
             session_state.context.pop("slot_offer_prompt", None)
