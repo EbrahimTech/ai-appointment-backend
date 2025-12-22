@@ -1,0 +1,66 @@
+{
+  "ASK_REASON": {
+    "ar": [
+      "ما سبب الزيارة؟ (تحويل/تجميلي/ألم/فحص/أخرى)",
+      "ما الذي يجلبك إلينا؟ (تحويل/تجميلي/ألم/فحص/أخرى)",
+      "سبب الزيارة؟ (تحويل/تجميلي/ألم/فحص/أخرى)",
+      "لماذا تقوم بالزيارة؟ (تحويل/تجميلي/ألم/فحص/أخرى)",
+      "ما هو غرض الزيارة؟ (تحويل/تجميلي/ألم/فحص/أخرى)"
+    ],
+    "en": [
+      "What is the visit reason? (referral/cosmetic/pain/checkup/other)",
+      "What brings you in? (referral/cosmetic/pain/checkup/other)",
+      "Visit reason? (referral/cosmetic/pain/checkup/other)",
+      "Why are you visiting? (referral/cosmetic/pain/checkup/other)",
+      "What is the purpose of the visit? (referral/cosmetic/pain/checkup/other)"
+    ]
+  },
+  "ASK_SERVICE": {
+    "ar": [
+      "أي خدمة تريد؟ (مثال: {services})",
+      "ما الخدمة التي تحتاجها؟ (مثال: {services})",
+      "يرجى اختيار خدمة. (مثال: {services})",
+      "ما نوع الخدمة المطلوبة؟ (مثال: {services})",
+      "أي خدمة يجب حجزها؟ (مثال: {services})"
+    ],
+    "en": [
+      "Which service would you like? (e.g., {services})",
+      "What service do you need? (e.g., {services})",
+      "Please choose a service. (e.g., {services})",
+      "What type of service is needed? (e.g., {services})",
+      "Which service should we book? (e.g., {services})"
+    ]
+  },
+  "ASK_DATE": {
+    "ar": [
+      "أي تاريخ يناسبك؟",
+      "ما التاريخ الذي يناسبك؟",
+      "متى تريد الموعد؟",
+      "يرجى مشاركة تاريخ مفضل.",
+      "أي يوم تفضل؟"
+    ],
+    "en": [
+      "Which date works for you?",
+      "What date suits you?",
+      "When would you like the appointment?",
+      "Please share a preferred date.",
+      "What day do you prefer?"
+    ]
+  },
+  "ASK_TIME_WINDOW": {
+    "ar": [
+      "أي فترة زمنية تناسبك؟ (صباح/ظهر/مساء/أي وقت)",
+      "ما وقت اليوم يناسبك؟ (صباح/ظهر/مساء/أي وقت)",
+      "متى تفضل الموعد؟ (صباح/ظهر/مساء/أي وقت)",
+      "يرجى اختيار فترة زمنية: صباح/ظهر/مساء/أي وقت.",
+      "أي فترة زمنية تفضل؟ (صباح/ظهر/مساء/أي وقت)"
+    ],
+    "en": [
+      "Which time window works for you? (morning/afternoon/evening/any)",
+      "What time of day works best? (morning/afternoon/evening/any)",
+      "When do you prefer the appointment? (morning/afternoon/evening/any)",
+      "Please choose a time window: morning/afternoon/evening/any.",
+      "What time window do you prefer? (morning/afternoon/evening/any)"
+    ]
+  }
+}

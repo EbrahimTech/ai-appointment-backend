@@ -625,6 +625,64 @@ class LLMRouter:
 
         return parsed
 
+    def extract_booking_slots(
+        self,
+        *,
+        clinic: Clinic,
+        language: str,
+        prompt: str,
+        conversation_id: int | None = None,
+    ) -> dict | None:
+        """Return extracted booking slots with confidence scores."""
+        if not self.api_key:
+            raise LLMRouterError("DeepSeek API key not configured.")
+        if not self._budget_available():
+            self._mark_economy_mode(self._get_session_state(conversation_id), None)
+            raise LLMRouterError("llm_budget_exhausted")
+
+        services = list(clinic.services.filter(is_active=True).order_by("name")[:10])
+        service_names = [
+            self._service_display_name(clinic, svc, language) for svc in services if svc.name or svc.code
+        ]
+        tz = clinic.tz or "UTC"
+        system = (
+            "You are a slot extractor. Return ONLY JSON.\n"
+            "Schema: {\"slots\":{\"reason\":\"\",\"service_text\":\"\",\"date_iso\":\"\",\"time_window\":\"\",\"patient_name\":\"\"},"
+            "\"confidence\":{\"reason\":0-1,\"service\":0-1,\"date\":0-1,\"time_window\":0-1,\"patient_name\":0-1}}\n"
+            "Rules:\n"
+            "- reason must be one of: referral, cosmetic, pain, checkup, other.\n"
+            "- time_window must be one of: morning, afternoon, evening, any.\n"
+            "- date_iso must be YYYY-MM-DD in clinic timezone.\n"
+            "- Use empty strings for unknown values.\n"
+            "- Do not add extra keys."
+        )
+        user = (
+            f"Language: {language}\n"
+            f"Clinic timezone: {tz}\n"
+            f"Services: {', '.join(service_names)}\n"
+            f"User: {prompt}\n"
+        )
+        content = self._send_llm_request(
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            prompt=prompt,
+            model=getattr(settings, "LLM_SLOT_EXTRACTOR_MODEL", self.model),
+            max_tokens=220,
+            temperature=0,
+            conversation_id=conversation_id,
+            call_label="slot_extract",
+        )
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            logger.warning("Slot extractor parse failed: %s", content)
+            return None
+
+        if not isinstance(parsed, dict):
+            return None
+        slots = parsed.get("slots") if isinstance(parsed.get("slots"), dict) else parsed
+        confidence = parsed.get("confidence") if isinstance(parsed.get("confidence"), dict) else {}
+        return {"slots": slots or {}, "confidence": confidence or {}}
+
     def plan_booking_decision(
         self,
         *,
