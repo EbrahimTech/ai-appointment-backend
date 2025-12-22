@@ -1413,6 +1413,56 @@ class LLMRouter:
             temperature=0.2,
         )
 
+    def compose_prompt_reply(
+        self,
+        *,
+        language: str,
+        state: str,
+        prompt: str,
+        options: list[str] | None = None,
+        conversation_id: int | None = None,
+    ) -> str:
+        """Rewrite a question prompt to be natural while keeping the same intent/options."""
+        if not self.api_key:
+            raise LLMRouterError("DeepSeek API key not configured.")
+
+        conversation: Conversation | None = None
+        session_state: SessionState | None = None
+        if conversation_id:
+            conversation = Conversation.objects.filter(pk=conversation_id).first()
+            if conversation:
+                session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
+
+        if not self._budget_available():
+            self._mark_economy_mode(session_state, conversation)
+            raise LLMRouterError("llm_budget_exhausted")
+
+        options_text = ", ".join([opt for opt in (options or []) if opt])
+        system = (
+            "You are a dental clinic assistant. Rewrite the question naturally.\n"
+            "- Ask only one short question.\n"
+            "- Keep the same intent as the original prompt.\n"
+            "- If options are provided, mention only those options and do not add new ones.\n"
+            "- Do not include service codes.\n"
+            "- Respond only in the requested language; if Arabic, avoid English words."
+        )
+        user = (
+            f"Language: {language}\n"
+            f"State: {state}\n"
+            f"Original: {prompt}\n"
+            f"Options: {options_text}\n"
+        )
+        return self._send_llm_request(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            prompt=prompt,
+            model=getattr(settings, "LLM_DYNAMIC_QUESTIONS_MODEL", self.model),
+            max_tokens=120,
+            temperature=0.4,
+        )
+
     def _parse_tool_datetime(self, raw: str | None, tzinfo: ZoneInfo) -> datetime | None:
         if not raw:
             return None
