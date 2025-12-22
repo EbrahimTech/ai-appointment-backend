@@ -1354,7 +1354,26 @@ class DialogOrchestrator:
 
     def _asks_for_slots(self, text: str) -> bool:
         lowered = text.lower()
-        cues = {"المواعيد", "الأوقات", "المتاح", "available times", "available slots"}
+        cues = {
+            "المواعيد",
+            "المواعيد المتاحة",
+            "الأوقات",
+            "الاوقات",
+            "الأوقات المتاحة",
+            "الاوقات المتاحة",
+            "ماهي المواعيد",
+            "ماهي الأوقات",
+            "ماهي الاوقات",
+            "أوقات",
+            "اوقات",
+            "اين الموعد",
+            "وين الموعد",
+            "الوقت المتاح",
+            "available times",
+            "available slots",
+            "what times",
+            "what slots",
+        }
         return any(cue in lowered for cue in cues)
 
     def _detect_time_window(self, text: str) -> str | None:
