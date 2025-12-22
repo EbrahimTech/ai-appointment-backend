@@ -195,8 +195,10 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "15"))
 LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "deepseek-chat")
 LLM_TOOL_PLANNER_MODEL = os.getenv("LLM_TOOL_PLANNER_MODEL", LLM_DEFAULT_MODEL)
+LLM_DECISION_MODEL = os.getenv("LLM_DECISION_MODEL", LLM_DEFAULT_MODEL)
 LLM_TOOL_CALLING_ENABLED = os.getenv("LLM_TOOL_CALLING_ENABLED", "false").lower() in {"1", "true", "yes"}
 LLM_TOOL_BOOKING_ENABLED = os.getenv("LLM_TOOL_BOOKING_ENABLED", "false").lower() in {"1", "true", "yes"}
+LLM_DECISION_JSON_ENABLED = get_bool_env("LLM_DECISION_JSON_ENABLED", default=True)
 RAG_INDEX_NAME = os.getenv("RAG_INDEX_NAME", "default")
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))
 LLM_MAX_LATENCY_MS = int(os.getenv("LLM_MAX_LATENCY_MS", "12000"))

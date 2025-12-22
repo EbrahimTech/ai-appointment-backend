@@ -572,6 +572,95 @@ class LLMRouter:
 
         return parsed
 
+    def plan_booking_decision(
+        self,
+        *,
+        clinic: Clinic,
+        language: str,
+        prompt: str,
+        state: str,
+        slots: dict,
+        missing_slots: list[str],
+    ) -> dict | None:
+        """Return a structured booking decision JSON or None on failure."""
+        if not self.api_key:
+            raise LLMRouterError("DeepSeek API key not configured.")
+
+        if not self._budget_available():
+            self._mark_economy_mode(None, None)
+            raise LLMRouterError("llm_budget_exhausted")
+
+        allowed_states = {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW", "SHOW_SLOTS"}
+        state_clean = state if state in allowed_states else "ASK_REASON"
+        services = list(clinic.services.filter(is_active=True).order_by("name")[:10])
+        service_names = [self._service_display_name(clinic, svc, language) for svc in services if svc.name or svc.code]
+
+        system = (
+            "You are a scheduling assistant. Return ONLY JSON.\n"
+            "Schema: {\"intent\":\"book\",\"state\":\"...\",\"missing_slots\":[],\"next_question\":\"...\",\"confidence\":0-1}\n"
+            "Rules:\n"
+            "- Ask at most one short question.\n"
+            "- Do NOT mention service codes.\n"
+            "- Use the requested language; if Arabic, avoid English words.\n"
+            "- Do NOT invent clinic facts; if missing, ask a clarifying question.\n"
+            "- Keep state within ASK_REASON/ASK_SERVICE/ASK_DATE/ASK_TIME_WINDOW/SHOW_SLOTS.\n"
+        )
+        user = (
+            f"Language: {language}\n"
+            f"State: {state_clean}\n"
+            f"Missing: {missing_slots}\n"
+            f"Known slots: {json.dumps(slots, ensure_ascii=False)}\n"
+            f"Services: {', '.join(service_names)}\n"
+            f"User: {prompt}\n"
+        )
+
+        content = self._send_llm_request(
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            prompt=prompt,
+            model=getattr(settings, "LLM_DECISION_MODEL", self.model),
+            max_tokens=220,
+            temperature=0.2,
+        )
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            logger.warning("Booking decision parse failed: %s", content)
+            return None
+
+        if not isinstance(parsed, dict):
+            return None
+
+        intent = str(parsed.get("intent", "book")).lower()
+        if intent != "book":
+            return None
+
+        decided_state = parsed.get("state", state_clean)
+        if decided_state not in allowed_states:
+            decided_state = state_clean
+
+        next_question = str(parsed.get("next_question", "")).strip()
+        if not next_question:
+            return None
+
+        returned_missing = parsed.get("missing_slots")
+        if isinstance(returned_missing, list):
+            filtered_missing = [m for m in returned_missing if m in missing_slots]
+        else:
+            filtered_missing = list(missing_slots)
+
+        try:
+            confidence = float(parsed.get("confidence", 0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        return {
+            "intent": "book",
+            "state": decided_state,
+            "missing_slots": filtered_missing,
+            "next_question": next_question,
+            "confidence": confidence,
+        }
+
     # ------------------------------------------------------------------ helpers
     def _budget_available(self) -> bool:
         if not self.daily_budget:
