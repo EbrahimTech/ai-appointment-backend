@@ -848,6 +848,8 @@ class LLMRouter:
             model=getattr(settings, "LLM_TOOL_PLANNER_MODEL", self.model),
             max_tokens=220,
             temperature=0,
+            conversation_id=conversation.id if conversation else None,
+            call_label="tool_plan",
         )
         try:
             return json.loads(content)
@@ -912,6 +914,7 @@ class LLMRouter:
                 language=language,
                 prompt=prompt,
                 purpose="book",
+                conversation_id=conversation.id if conversation else None,
             )
         if not start_local:
             return {"error": "missing_time", "service_code": service_code}
@@ -977,6 +980,7 @@ class LLMRouter:
                 language=language,
                 prompt=prompt,
                 purpose="cancel",
+                conversation_id=conversation.id if conversation else None,
             )
             if parsed:
                 start_iso = parsed.isoformat()
@@ -1017,6 +1021,7 @@ class LLMRouter:
                 language=language,
                 prompt=prompt,
                 purpose="reschedule",
+                conversation_id=conversation.id if conversation else None,
             )
             if parsed:
                 start_iso = parsed.isoformat()
@@ -1041,6 +1046,7 @@ class LLMRouter:
                 language=language,
                 prompt=prompt,
                 purpose="reschedule",
+                conversation_id=conversation.id if conversation else None,
             )
         if not start_local:
             service = appointment.service
@@ -1182,6 +1188,7 @@ class LLMRouter:
         language: str,
         prompt: str,
         purpose: str,
+        conversation_id: int | None = None,
     ) -> datetime | None:
         if not prompt or not self.api_key:
             return None
@@ -1211,6 +1218,8 @@ class LLMRouter:
             model=getattr(settings, "LLM_TIME_PARSER_MODEL", self.model),
             max_tokens=120,
             temperature=0,
+            conversation_id=conversation_id,
+            call_label=f"time_parse_{purpose}",
         )
         try:
             parsed = json.loads(content)
@@ -1396,6 +1405,8 @@ class LLMRouter:
             model=self.model,
             max_tokens=80,
             temperature=0,
+            conversation_id=conversation_id,
+            call_label="slot_select",
         )
         try:
             parsed = json.loads(content)
@@ -1467,6 +1478,8 @@ class LLMRouter:
             model=self.model,
             max_tokens=120,
             temperature=0.2,
+            conversation_id=conversation_id,
+            call_label=f"action_{action_clean or 'reply'}",
         )
 
     def compose_prompt_reply(
@@ -1517,6 +1530,8 @@ class LLMRouter:
             model=getattr(settings, "LLM_DYNAMIC_QUESTIONS_MODEL", self.model),
             max_tokens=120,
             temperature=0.4,
+            conversation_id=conversation_id,
+            call_label="prompt_rewrite",
         )
 
     def _parse_tool_datetime(self, raw: str | None, tzinfo: ZoneInfo) -> datetime | None:
@@ -1538,7 +1553,12 @@ class LLMRouter:
         model: str,
         max_tokens: int,
         temperature: float,
+        conversation_id: int | None = None,
+        call_label: str = "llm",
     ) -> str:
+        session_state = self._get_session_state(conversation_id)
+        if session_state:
+            self._check_llm_call_budget(session_state)
         start = timezone.now()
         try:
             response = requests.post(
@@ -1580,6 +1600,14 @@ class LLMRouter:
             success=True,
             cost_estimate=self.cost_per_request,
         )
+        if session_state:
+            self._record_llm_usage(
+                session_state=session_state,
+                label=call_label,
+                model=model,
+                usage=payload.get("usage") if isinstance(payload, dict) else None,
+                prompt=prompt,
+            )
         return content
 
     def _build_context(self, chunks: List[KnowledgeChunk]) -> Tuple[str, List[KnowledgeChunk]]:

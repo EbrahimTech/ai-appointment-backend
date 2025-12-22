@@ -46,6 +46,8 @@ class DialogOrchestrator:
         body: str,
         language: str,
     ) -> Tuple[str | None, str]:
+        session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
+        self._reset_llm_trace(session_state)
         if (
             conversation.patient
             and conversation.patient.language
@@ -65,13 +67,13 @@ class DialogOrchestrator:
                     clinic=conversation.clinic,
                     language=language,
                     prompt=body,
+                    conversation_id=conversation.id,
                 )
                 if intent_result:
                     conf = intent_result.get("confidence", 0)
                     threshold = float(getattr(settings, "LLM_INTENT_CONF_THRESHOLD", 0.55))
                     if conf >= threshold and intent_result.get("intent") != "off_topic":
                         intent = intent_result.get("intent", intent)
-                    session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
                     session_state.context["llm_intent"] = intent_result
                     session_state.save(update_fields=["context", "updated_at"])
             except LLMRouterError as exc:
@@ -94,8 +96,7 @@ class DialogOrchestrator:
             intent=intent,
             metadata={"received_at": timezone.now().isoformat()},
         )
-
-        session_state, _ = SessionState.objects.get_or_create(conversation=conversation)
+        self._set_llm_trace_inbound(session_state, inbound_message.id)
         if general_inquiry:
             self._clear_booking_flow(session_state)
             self._clear_action_flow(session_state)
