@@ -621,10 +621,20 @@ class LLMRouter:
         return (
             "You are an appointment assistant for a dental clinic.\n"
             "- Use ONLY the facts in the provided context (services, prices, durations, slots).\n"
-            "- Never invent or guess. If information is missing, say you don't have it.\n"
-            "- Keep responses under two sentences; be concise and patient-friendly.\n"
-            "- If off-topic, say so and steer back to dental appointments.\n"
+            "- Never invent or guess. If information is missing, ask one short clarifying question.\n"
+            "- Keep responses under three sentences and ask at most one question.\n"
+            "- If off-topic, politely steer back to appointments or clinic info.\n"
             "- Do not provide medical advice or pricing not present in context."
+        )
+
+    def _general_system_prompt(self) -> str:
+        return (
+            "You are a helpful dental clinic assistant.\n"
+            "- You can help with booking, rescheduling, cancellations, clinic services, hours, and basic process.\n"
+            "- If a request needs clinic-specific details you do not have, ask one short clarifying question.\n"
+            "- Do not provide medical advice; suggest booking a consultation for medical questions.\n"
+            "- Keep responses under three sentences and ask at most one question.\n"
+            "- Respond in the requested language and be polite and concise."
         )
 
     def _plan_tool_call(
