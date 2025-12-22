@@ -927,7 +927,7 @@ class DialogOrchestrator:
                         actions=["show_slots"],
                         prompt=slot_prompt,
                     )
-                    return slot_prompt
+                return slot_prompt
 
         missing: list[str] = []
         if not slots.get("reason"):
@@ -988,6 +988,7 @@ class DialogOrchestrator:
                 self.fsm.apply(conversation, "slot_proposed", context={"message": body})
                 state = "SHOW_SLOTS"
 
+        decision_used = False
         if (
             prompt
             and state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}
@@ -1011,6 +1012,7 @@ class DialogOrchestrator:
                         and decision.get("next_question")
                     ):
                         prompt = decision.get("next_question")
+                        decision_used = True
                         decision_missing = decision.get("missing_slots") or []
                         if decision_missing and all(item in missing for item in decision_missing):
                             missing = decision_missing
@@ -1018,6 +1020,39 @@ class DialogOrchestrator:
                 logger.warning("LLM booking decision skipped: %s", exc)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error("LLM booking decision error: %s", exc, exc_info=True)
+
+        if (
+            prompt
+            and state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}
+            and not decision_used
+            and getattr(settings, "LLM_DYNAMIC_QUESTIONS_ENABLED", False)
+        ):
+            options: list[str] = []
+            if state == "ASK_REASON":
+                if language == "ar":
+                    options = ["تحويل", "تجميلي", "ألم", "فحص", "أخرى"]
+                else:
+                    options = ["referral", "cosmetic", "pain", "checkup", "other"]
+            elif state == "ASK_TIME_WINDOW":
+                if language == "ar":
+                    options = ["صباح", "ظهر", "مساء", "أي وقت"]
+                else:
+                    options = ["morning", "afternoon", "evening", "any"]
+            elif state == "ASK_SERVICE":
+                options = [svc.name for svc in services if svc.name][:6]
+
+            try:
+                prompt = self.llm_router.compose_prompt_reply(
+                    language=language,
+                    state=state,
+                    prompt=prompt,
+                    options=options,
+                    conversation_id=conversation.id,
+                )
+            except LLMRouterError as exc:
+                logger.warning("LLM prompt rewrite skipped: %s", exc)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("LLM prompt rewrite error: %s", exc, exc_info=True)
 
         if state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}:
             session_state.context.pop("slot_suggestions", None)
