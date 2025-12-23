@@ -63,6 +63,15 @@ class DialogOrchestrator:
         explicit_booking = self._is_explicit_booking_request(normalized)
         handoff_question = self._is_handoff_question(normalized)
         resume_bot = self._wants_bot_resume(normalized)
+        booking_ctx = session_state.context.get("booking_flow") or {}
+        booking_active = bool(booking_ctx) and booking_ctx.get("state") not in {"BOOKED", "DONE"}
+        if booking_active and general_inquiry:
+            general_inquiry = False
+            preface = "Sure, go ahead with your question. To continue the booking:"
+            if language == "ar":
+                preface = "\u0623\u0643\u064a\u062f\u060c \u062a\u0641\u0636\u0644 \u0633\u0624\u0627\u0644\u0643. \u0648\u0644\u0646\u0643\u0645\u0644 \u0627\u0644\u062d\u062c\u0632:"
+            session_state.context["booking_preface"] = preface
+            session_state.save(update_fields=["context", "updated_at"])
         # LLM intent fallback (structured) to better understand Arabic/free-form requests
         if intent == "clarify" and getattr(settings, "LLM_INTENT_ENABLED", True) and not general_inquiry:
             try:
@@ -405,30 +414,19 @@ class DialogOrchestrator:
             repeat_tracker.get("intent") not in productive_intents
             and repeat_tracker.get("count", 0) >= repeat_threshold
         ):
-            conversation.handoff_required = True
-            conversation.save(update_fields=["handoff_required", "updated_at"])
             session_state.context["handoff_reason"] = "repeat"
-            session_state.save(update_fields=["context", "updated_at"])
-            # reset repeat tracker to avoid immediate retrigger after manual handoff clear
             session_state.context["repeat_tracker"] = {"intent": repeat_intent, "count": 0, "last_seen": now.isoformat()}
             session_state.save(update_fields=["context", "updated_at"])
-            try:
-                from apps.accounts.notifications import notify_handoff
-
-                notify_handoff(conversation)
-            except Exception as err:  # pragma: no cover - best effort logging
-                logger.warning("Failed to create handoff notification: %s", err)
-
-            response_text = AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+            response_text = self._safe_clarify_prompt(language)
             response_text = self._send_outbound_message(
                 conversation=conversation,
                 language=language,
                 body=response_text,
-                intent="handoff",
+                intent="clarify",
                 metadata={"auto_reply": True, "reason": "repeat_intent_threshold"},
-                idempotency_key=f"handoff:{conversation.id}:{inbound_message.id}",
+                idempotency_key=f"clarify-repeat:{conversation.id}:{inbound_message.id}",
             )
-            return response_text, "handoff"
+            return response_text, "clarify"
 
         # إذا كان التحويل للبشري مفعلاً، لا نرد تلقائياً
         if conversation.handoff_required:
@@ -790,6 +788,52 @@ class DialogOrchestrator:
         queue_session: bool = True,
     ) -> str:
         clean_body = self._sanitize_response(conversation, body or "", language)
+        session_state = SessionState.objects.filter(conversation=conversation).first()
+        valid, fail_reason = self._validate_reply(
+            conversation=conversation,
+            session_state=session_state,
+            text=clean_body,
+            language=language,
+        )
+        if not valid:
+            repaired = self._repair_reply_once(
+                conversation=conversation,
+                language=language,
+                text=clean_body,
+                reason=fail_reason or "invalid_reply",
+                session_state=session_state,
+            )
+            if repaired:
+                clean_body = self._sanitize_response(conversation, repaired, language)
+                valid, fail_reason = self._validate_reply(
+                    conversation=conversation,
+                    session_state=session_state,
+                    text=clean_body,
+                    language=language,
+                )
+
+        if not valid:
+            fail_count = self._record_validator_failure(session_state, fail_reason or "invalid_reply")
+            if fail_count >= 3 and not conversation.handoff_required:
+                conversation.handoff_required = True
+                conversation.save(update_fields=["handoff_required", "updated_at"])
+                if session_state:
+                    session_state.context["handoff_reason"] = "validator_fail"
+                    session_state.save(update_fields=["context", "updated_at"])
+                try:
+                    from apps.accounts.notifications import notify_handoff
+
+                    notify_handoff(conversation)
+                except Exception as err:  # pragma: no cover - best effort logging
+                    logger.warning("Failed to create handoff notification: %s", err)
+                clean_body = (
+                    AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+                )
+            else:
+                clean_body = self._safe_clarify_prompt(language)
+        else:
+            self._clear_validator_failure(session_state)
+
         if not clean_body:
             clean_body = (
                 AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
@@ -832,8 +876,12 @@ class DialogOrchestrator:
         cleaned = (text or "").strip()
         if not cleaned:
             return cleaned
+
+    def _safe_clarify_prompt(self, language: str) -> str:
+        if language == "ar":
+            return "\u0645\u0646 \u0641\u0636\u0644\u0643 \u0648\u0636\u0651\u062d \u0637\u0644\u0628\u0643 \u0628\u0643\u0644\u0645\u0629 \u0648\u0627\u062d\u062f\u0629."
+        return "Could you clarify your request in one sentence?"
         cleaned = self._strip_service_codes(cleaned, conversation, language)
-        cleaned = self._strip_extra_questions(cleaned)
         if language == "ar":
             cleaned = re.sub(r"\(\s*[A-Za-z0-9 _-]+\s*\)", "", cleaned)
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
@@ -987,18 +1035,49 @@ class DialogOrchestrator:
 
         prompt = ""
         actions: list[str] = []
-        if "reason" in missing:
-            state = "ASK_REASON"
-            prompt = self._format_reason_prompt(language)
-        elif "service" in missing:
-            state = "ASK_SERVICE"
-            prompt = self._format_service_prompt(language, services)
-        elif "date" in missing:
-            state = "ASK_DATE"
-            prompt = self._format_date_prompt(language)
-        elif "time_window" in missing:
-            state = "ASK_TIME_WINDOW"
-            prompt = self._format_time_window_prompt(language)
+        if missing:
+            if "reason" in missing:
+                state = "ASK_REASON"
+            elif "service" in missing:
+                state = "ASK_SERVICE"
+            elif "date" in missing:
+                state = "ASK_DATE"
+            elif "time_window" in missing:
+                state = "ASK_TIME_WINDOW"
+
+            if getattr(settings, "LLM_DECISION_JSON_ENABLED", False):
+                try:
+                    decision = self.llm_router.plan_booking_decision(
+                        clinic=clinic,
+                        language=language,
+                        prompt=body,
+                        state=state,
+                        slots=slots,
+                        missing_slots=missing,
+                        conversation_id=conversation.id,
+                    )
+                    if decision:
+                        session_state.context["llm_decision"] = decision
+                        min_conf = float(getattr(settings, "LLM_DECISION_CONF_THRESHOLD", 0.5))
+                        confidence = float(decision.get("confidence", 0))
+                        if confidence >= min_conf:
+                            decided_state = decision.get("state") or state
+                            if decided_state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}:
+                                state = decided_state
+                            decision_missing = decision.get("missing_slots") or []
+                            if decision_missing and all(item in missing for item in decision_missing):
+                                missing = decision_missing
+                except LLMRouterError as exc:
+                    logger.warning("LLM booking decision skipped: %s", exc)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error("LLM booking decision error: %s", exc, exc_info=True)
+
+            prompt = self._prompt_for_state(
+                session_state=session_state,
+                state=state,
+                language=language,
+                services=services,
+            )
         else:
             service = clinic.services.filter(code=slots.get("service_code"), is_active=True).first()
             if not service:
@@ -1018,7 +1097,21 @@ class DialogOrchestrator:
                     if language == "ar"
                     else "No availability on that day. What date works for you?"
                 )
+                conflict_count = self._record_slot_conflict(session_state)
+                if conflict_count >= 2 and not conversation.handoff_required:
+                    conversation.handoff_required = True
+                    conversation.save(update_fields=["handoff_required", "updated_at"])
+                    session_state.context["handoff_reason"] = "slot_conflict"
+                    session_state.save(update_fields=["context", "updated_at"])
+                    try:
+                        from apps.accounts.notifications import notify_handoff
+
+                        notify_handoff(conversation)
+                    except Exception as err:  # pragma: no cover - best effort logging
+                        logger.warning("Failed to create handoff notification: %s", err)
+                    return AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
             else:
+                session_state.context.pop("slot_conflict_count", None)
                 prompt = self._build_slot_prompt(available, language, clinic.tz)
                 session_state.context["slot_suggestions"] = [
                     {
@@ -1034,72 +1127,9 @@ class DialogOrchestrator:
                 self.fsm.apply(conversation, "slot_proposed", context={"message": body})
                 state = "SHOW_SLOTS"
 
-        decision_used = False
-        if (
-            prompt
-            and state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}
-            and getattr(settings, "LLM_DECISION_JSON_ENABLED", False)
-        ):
-            try:
-                decision = self.llm_router.plan_booking_decision(
-                    clinic=clinic,
-                    language=language,
-                    prompt=body,
-                    state=state,
-                    slots=slots,
-                    missing_slots=missing,
-                    conversation_id=conversation.id,
-                )
-                if decision:
-                    min_conf = float(getattr(settings, "LLM_DECISION_CONF_THRESHOLD", 0.5))
-                    confidence = float(decision.get("confidence", 0))
-                    if (
-                        confidence >= min_conf
-                        and decision.get("state") == state
-                        and decision.get("next_question")
-                    ):
-                        prompt = decision.get("next_question")
-                        decision_used = True
-                        decision_missing = decision.get("missing_slots") or []
-                        if decision_missing and all(item in missing for item in decision_missing):
-                            missing = decision_missing
-            except LLMRouterError as exc:
-                logger.warning("LLM booking decision skipped: %s", exc)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.error("LLM booking decision error: %s", exc, exc_info=True)
-
-        if (
-            prompt
-            and state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}
-            and not decision_used
-            and getattr(settings, "LLM_DYNAMIC_QUESTIONS_ENABLED", False)
-        ):
-            options: list[str] = []
-            if state == "ASK_REASON":
-                if language == "ar":
-                    options = ["تحويل", "تجميلي", "ألم", "فحص", "أخرى"]
-                else:
-                    options = ["referral", "cosmetic", "pain", "checkup", "other"]
-            elif state == "ASK_TIME_WINDOW":
-                if language == "ar":
-                    options = ["صباح", "ظهر", "مساء", "أي وقت"]
-                else:
-                    options = ["morning", "afternoon", "evening", "any"]
-            elif state == "ASK_SERVICE":
-                options = [svc.name for svc in services if svc.name][:6]
-
-            try:
-                prompt = self.llm_router.compose_prompt_reply(
-                    language=language,
-                    state=state,
-                    prompt=prompt,
-                    options=options,
-                    conversation_id=conversation.id,
-                )
-            except LLMRouterError as exc:
-                logger.warning("LLM prompt rewrite skipped: %s", exc)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.error("LLM prompt rewrite error: %s", exc, exc_info=True)
+        preface = session_state.context.pop("booking_preface", None)
+        if preface and prompt:
+            prompt = f"{preface} {prompt}".strip()
 
         if state in {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW"}:
             session_state.context.pop("slot_suggestions", None)
@@ -1367,6 +1397,12 @@ class DialogOrchestrator:
         session_state.context.pop("action_flow", None)
         if session_state.context.get("decision", {}).get("intent") in {"cancel", "reschedule"}:
             session_state.context.pop("decision", None)
+
+    def _record_slot_conflict(self, session_state: SessionState) -> int:
+        count = int(session_state.context.get("slot_conflict_count", 0)) + 1
+        session_state.context["slot_conflict_count"] = count
+        session_state.save(update_fields=["context", "updated_at"])
+        return count
 
     def _detect_booking_reason(self, text: str, language: str) -> str | None:
         lowered = text.lower()
