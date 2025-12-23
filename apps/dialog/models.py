@@ -55,6 +55,8 @@ class DialogTurnLog(TimeStampedModel):
     intent_predicted = models.CharField(max_length=100, blank=True)
     intent_confidence = models.FloatField(default=0)
     state = models.CharField(max_length=50, blank=True)
+    slots = models.JSONField(default=dict, blank=True)
+    missing_slots = models.JSONField(default=list, blank=True)
     handoff_reason = models.CharField(max_length=100, blank=True)
     validator_fail_reason = models.CharField(max_length=100, blank=True)
     llm_calls = models.PositiveIntegerField(default=0)

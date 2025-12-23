@@ -62,5 +62,21 @@
       "Please choose a time window: morning/afternoon/evening/any.",
       "What time window do you prefer? (morning/afternoon/evening/any)"
     ]
+  },
+  "ASK_PAIN_LEVEL": {
+    "ar": [
+      "ما مستوى الألم؟ (خفيف/متوسط/شديد)",
+      "هل الألم خفيف أم متوسط أم شديد؟",
+      "يرجى تقييم الألم: خفيف أو متوسط أو شديد.",
+      "هل يمكنك وصف الألم: خفيف أم متوسط أم شديد؟",
+      "مستوى الألم؟ (خفيف/متوسط/شديد)"
+    ],
+    "en": [
+      "How severe is the pain? (mild/moderate/severe)",
+      "Is the pain mild, moderate, or severe?",
+      "Please rate the pain: mild, moderate, or severe.",
+      "Would you say the pain is mild, moderate, or severe?",
+      "Pain level? (mild/moderate/severe)"
+    ]
   }
 }

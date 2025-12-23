@@ -208,6 +208,11 @@ LLM_SLOT_EXTRACTOR_MODEL = os.getenv("LLM_SLOT_EXTRACTOR_MODEL", LLM_DECISION_MO
 RAG_INDEX_NAME = os.getenv("RAG_INDEX_NAME", "default")
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))
 RAG_SCORE_THRESHOLD = float(os.getenv("RAG_SCORE_THRESHOLD", "0"))
+RAG_ALLOWED_TAGS = [
+    tag.strip()
+    for tag in os.getenv("RAG_ALLOWED_TAGS", "policy,faq").split(",")
+    if tag.strip()
+]
 LLM_MAX_LATENCY_MS = int(os.getenv("LLM_MAX_LATENCY_MS", "12000"))
 LLM_COST_BUDGET_PER_DAY = Decimal(os.getenv("LLM_COST_BUDGET_PER_DAY", "0"))
 LLM_COST_PER_REQUEST = Decimal(os.getenv("LLM_COST_PER_REQUEST", "0.002"))

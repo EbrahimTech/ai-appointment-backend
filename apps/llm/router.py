@@ -167,15 +167,16 @@ class LLMRouter:
         context_text, grounded_chunks = self._build_context(chunks)
         # add live clinic snapshot (services/pricing/slots)
         snapshot = self._clinic_snapshot(clinic)
-        if snapshot:
+        allow_snapshot = self._is_snapshot_answerable(prompt)
+        if snapshot and allow_snapshot:
             context_text = snapshot + "\n\n" + context_text
+        elif not allow_snapshot:
+            snapshot = ""
 
         has_context = bool(grounded_chunks or snapshot)
         if not has_context:
-            allow_fallback = getattr(settings, "LLM_ALLOW_GENERAL_FALLBACK", True)
-            if not allow_fallback:
-                self._register_not_understood(session_state, conversation)
-                raise LLMRouterError("rag_context_missing")
+            self._register_not_understood(session_state, conversation)
+            raise LLMRouterError("rag_context_missing")
 
         guardrails = self._system_prompt() if has_context else self._general_system_prompt()
         messages = [
@@ -647,10 +648,13 @@ class LLMRouter:
         tz = clinic.tz or "UTC"
         system = (
             "You are a slot extractor. Return ONLY JSON.\n"
-            "Schema: {\"slots\":{\"reason\":\"\",\"service_text\":\"\",\"date_iso\":\"\",\"time_window\":\"\",\"patient_name\":\"\"},"
-            "\"confidence\":{\"reason\":0-1,\"service\":0-1,\"date\":0-1,\"time_window\":0-1,\"patient_name\":0-1}}\n"
+            "Schema: {\"slots\":{\"reason\":\"\",\"service_text\":\"\",\"service_code\":\"\",\"date_iso\":\"\","
+            "\"date_text\":\"\",\"time_window\":\"\",\"pain_level\":\"\",\"patient_name\":\"\"},"
+            "\"confidence\":{\"reason\":0-1,\"service\":0-1,\"date\":0-1,\"time_window\":0-1,"
+            "\"pain_level\":0-1,\"patient_name\":0-1}}\n"
             "Rules:\n"
             "- reason must be one of: referral, cosmetic, pain, checkup, other.\n"
+            "- pain_level must be one of: mild, moderate, severe.\n"
             "- time_window must be one of: morning, afternoon, evening, any.\n"
             "- date_iso must be YYYY-MM-DD in clinic timezone.\n"
             "- Use empty strings for unknown values.\n"
@@ -702,7 +706,14 @@ class LLMRouter:
             self._mark_economy_mode(None, None)
             raise LLMRouterError("llm_budget_exhausted")
 
-        allowed_states = {"ASK_REASON", "ASK_SERVICE", "ASK_DATE", "ASK_TIME_WINDOW", "SHOW_SLOTS"}
+        allowed_states = {
+            "ASK_REASON",
+            "ASK_PAIN_LEVEL",
+            "ASK_SERVICE",
+            "ASK_DATE",
+            "ASK_TIME_WINDOW",
+            "SHOW_SLOTS",
+        }
         state_clean = state if state in allowed_states else "ASK_REASON"
         services = list(clinic.services.filter(is_active=True).order_by("name")[:10])
         service_names = [self._service_display_name(clinic, svc, language) for svc in services if svc.name or svc.code]
@@ -715,7 +726,7 @@ class LLMRouter:
             "- Do NOT mention service codes.\n"
             "- Use the requested language; if Arabic, avoid English words.\n"
             "- Do NOT invent clinic facts; if missing, ask a clarifying question.\n"
-            "- Keep state within ASK_REASON/ASK_SERVICE/ASK_DATE/ASK_TIME_WINDOW/SHOW_SLOTS.\n"
+            "- Keep state within ASK_REASON/ASK_PAIN_LEVEL/ASK_SERVICE/ASK_DATE/ASK_TIME_WINDOW/SHOW_SLOTS.\n"
         )
         user = (
             f"Language: {language}\n"
@@ -795,9 +806,6 @@ class LLMRouter:
         guardrails["economy_mode"] = True
         session_state.llm_guardrails = guardrails
         session_state.save(update_fields=["llm_guardrails", "updated_at"])
-        if conversation and not conversation.handoff_required:
-            conversation.handoff_required = True
-            conversation.save(update_fields=["handoff_required", "updated_at"])
 
     def _register_not_understood(
         self,
@@ -810,15 +818,6 @@ class LLMRouter:
         guardrails["not_understood"] = guardrails.get("not_understood", 0) + 1
         session_state.llm_guardrails = guardrails
         session_state.save(update_fields=["llm_guardrails", "updated_at"])
-        if guardrails["not_understood"] >= 2 and conversation and not conversation.handoff_required:
-            conversation.handoff_required = True
-            conversation.save(update_fields=["handoff_required", "updated_at"])
-            try:
-                from apps.accounts.notifications import notify_handoff
-
-                notify_handoff(conversation)
-            except Exception as exc:  # pragma: no cover - best effort log
-                logger.warning("Failed to create handoff notification: %s", exc)
 
     def _system_prompt(self) -> str:
         return (
@@ -839,6 +838,45 @@ class LLMRouter:
             "- Keep responses under three sentences and ask at most one question.\n"
             "- Respond in the requested language and be polite and concise."
         )
+
+    def _is_snapshot_answerable(self, prompt: str) -> bool:
+        lowered = (prompt or "").lower()
+        cues = {
+            "price",
+            "cost",
+            "fee",
+            "service",
+            "services",
+            "appointment",
+            "book",
+            "booking",
+            "schedule",
+            "hours",
+            "open",
+            "close",
+            "available",
+            "availability",
+            "سعر",
+            "اسعار",
+            "أسعار",
+            "تكلفة",
+            "خدمة",
+            "الخدمات",
+            "موعد",
+            "حجز",
+            "مواعيد",
+            "دوام",
+            "ساعات",
+            "أوقات",
+            "الاوقات",
+            "وقت",
+            "الدوام",
+            "المواعيد",
+            "فتح",
+            "إغلاق",
+            "اغلاق",
+        }
+        return any(cue in lowered for cue in cues)
 
     def _plan_tool_call(
         self,
@@ -1765,6 +1803,10 @@ class LLMRouter:
 
     def _retrieve_chunks(self, clinic: Clinic, language: str) -> List[KnowledgeChunk]:
         desired_language = language or LanguageChoices.ENGLISH
+        min_score = float(getattr(settings, "RAG_SCORE_THRESHOLD", 0))
+        allowed_tags = list(getattr(settings, "RAG_ALLOWED_TAGS", []) or [])
+        tag_filter = {"tags__overlap": allowed_tags} if allowed_tags else {}
+        score_filter = {"score__gte": min_score} if min_score > 0 else {}
         try:
             index = KnowledgeIndex.objects.get(
                 clinic=clinic,
@@ -1779,6 +1821,8 @@ class LLMRouter:
                 document__clinic=clinic,
                 language=desired_language,
                 document__indices=index,
+                **tag_filter,
+                **score_filter,
             )
             .order_by("-score", "chunk_index")[: self.top_k]
         )
@@ -1790,6 +1834,8 @@ class LLMRouter:
             KnowledgeChunk.objects.filter(
                 document__clinic=clinic,
                 document__indices=index,
+                **tag_filter,
+                **score_filter,
             )
             .exclude(language=desired_language)
             .order_by("-score", "chunk_index")[: self.top_k]

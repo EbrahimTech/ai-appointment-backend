@@ -113,6 +113,8 @@ def _log_dialog_turn(
             intent_predicted=str(llm_intent.get("intent") or intent or ""),
             intent_confidence=float(llm_intent.get("confidence") or 0),
             state=str(decision.get("state") or ""),
+            slots=decision.get("slots") if isinstance(decision, dict) else {},
+            missing_slots=decision.get("missing_slots") if isinstance(decision, dict) else [],
             handoff_reason=str(context.get("handoff_reason") or ""),
             validator_fail_reason=str(context.get("validator_fail_reason") or ""),
             llm_calls=int(llm_trace.get("calls") or 0),
