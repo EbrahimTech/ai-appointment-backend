@@ -1302,32 +1302,32 @@ class LLMRouter:
             return dt.strftime("%A %d %b %I:%M %p")
 
         day_names = [
-            "???????",
-            "????????",
-            "????????",
-            "??????",
-            "??????",
-            "?????",
-            "?????",
+            "الاثنين",
+            "الثلاثاء",
+            "الأربعاء",
+            "الخميس",
+            "الجمعة",
+            "السبت",
+            "الأحد",
         ]
         month_names = [
-            "?????",
-            "??????",
-            "????",
-            "?????",
-            "????",
-            "?????",
-            "?????",
-            "?????",
-            "??????",
-            "??????",
-            "??????",
-            "??????",
+            "يناير",
+            "فبراير",
+            "مارس",
+            "أبريل",
+            "مايو",
+            "يونيو",
+            "يوليو",
+            "أغسطس",
+            "سبتمبر",
+            "أكتوبر",
+            "نوفمبر",
+            "ديسمبر",
         ]
         day_name = day_names[dt.weekday()]
         month_name = month_names[dt.month - 1]
         hour = dt.hour
-        period = "??????" if hour < 12 else "?????"
+        period = "صباحاً" if hour < 12 else "مساءً"
         hour12 = hour % 12
         if hour12 == 0:
             hour12 = 12
@@ -1590,6 +1590,48 @@ class LLMRouter:
             temperature=0.4,
             conversation_id=conversation_id,
             call_label="prompt_rewrite",
+        )
+
+    def repair_reply(
+        self,
+        *,
+        language: str,
+        text: str,
+        reason: str,
+        allow_time: bool,
+        conversation_id: int | None = None,
+    ) -> str:
+        """Repair an assistant reply to meet formatting/guardrail constraints."""
+        if not self.api_key:
+            raise LLMRouterError("DeepSeek API key not configured.")
+        if not self._budget_available():
+            self._mark_economy_mode(self._get_session_state(conversation_id), None)
+            raise LLMRouterError("llm_budget_exhausted")
+
+        system = (
+            "You are a dental clinic assistant. Repair the assistant reply.\n"
+            "- Output ONE short message.\n"
+            "- Ask at most ONE question.\n"
+            "- Do NOT include service codes.\n"
+            "- If language is Arabic, do NOT include English words.\n"
+            "- Do NOT mention appointment times unless allow_time=true.\n"
+            "- Do NOT provide medical advice.\n"
+            "Return only the repaired message text."
+        )
+        user = (
+            f"Language: {language}\n"
+            f"Allow_time: {allow_time}\n"
+            f"Failure_reason: {reason}\n"
+            f"Original: {text}\n"
+        )
+        return self._send_llm_request(
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            prompt=text,
+            model=self.model,
+            max_tokens=140,
+            temperature=0.2,
+            conversation_id=conversation_id,
+            call_label="reply_repair",
         )
 
     def _parse_tool_datetime(self, raw: str | None, tzinfo: ZoneInfo) -> datetime | None:

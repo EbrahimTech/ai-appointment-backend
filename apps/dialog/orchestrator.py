@@ -881,6 +881,96 @@ class DialogOrchestrator:
         if language == "ar":
             return "\u0645\u0646 \u0641\u0636\u0644\u0643 \u0648\u0636\u0651\u062d \u0637\u0644\u0628\u0643 \u0628\u0643\u0644\u0645\u0629 \u0648\u0627\u062d\u062f\u0629."
         return "Could you clarify your request in one sentence?"
+
+    def _validate_reply(
+        self,
+        *,
+        conversation: Conversation,
+        session_state: SessionState | None,
+        text: str,
+        language: str,
+    ) -> tuple[bool, str | None]:
+        if not text or not text.strip():
+            return False, "empty"
+        if self._count_questions(text) > 1:
+            return False, "multi_question"
+        if language == "ar" and self._contains_english(text):
+            return False, "english_in_ar"
+        if self._mentions_time(text) and not self._has_slot_context(session_state):
+            return False, "slot_without_db"
+        return True, None
+
+    def _repair_reply_once(
+        self,
+        *,
+        conversation: Conversation,
+        language: str,
+        text: str,
+        reason: str,
+        session_state: SessionState | None,
+    ) -> str | None:
+        if not text:
+            return None
+        allow_time = self._has_slot_context(session_state)
+        try:
+            return self.llm_router.repair_reply(
+                language=language,
+                text=text,
+                reason=reason,
+                allow_time=allow_time,
+                conversation_id=conversation.id,
+            )
+        except LLMRouterError as exc:
+            logger.warning("LLM reply repair skipped: %s", exc)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("LLM reply repair error: %s", exc, exc_info=True)
+        return None
+
+    def _record_validator_failure(self, session_state: SessionState | None, reason: str) -> int:
+        if not session_state:
+            return 0
+        failures = session_state.context.get("validator_failures") or {}
+        if not isinstance(failures, dict):
+            failures = {}
+        count = int(failures.get("count", 0)) + 1
+        failures["count"] = count
+        failures["last_reason"] = reason
+        session_state.context["validator_failures"] = failures
+        session_state.context["validator_fail_reason"] = reason
+        session_state.save(update_fields=["context", "updated_at"])
+        return count
+
+    def _clear_validator_failure(self, session_state: SessionState | None) -> None:
+        if not session_state:
+            return
+        session_state.context.pop("validator_failures", None)
+        session_state.context.pop("validator_fail_reason", None)
+        session_state.save(update_fields=["context", "updated_at"])
+
+    def _has_slot_context(self, session_state: SessionState | None) -> bool:
+        if not session_state:
+            return False
+        if session_state.context.get("slot_suggestions"):
+            return True
+        decision = session_state.context.get("decision") or {}
+        if isinstance(decision, dict) and "get_available_slots" in (decision.get("actions") or []):
+            return True
+        return False
+
+    def _count_questions(self, text: str) -> int:
+        return text.count("?") + text.count("\u061f")
+
+    def _contains_english(self, text: str) -> bool:
+        return bool(re.search(r"[A-Za-z]{3,}", text or ""))
+
+    def _mentions_time(self, text: str) -> bool:
+        if not text:
+            return False
+        if re.search(r"\b\d{1,2}:\d{2}\b", text):
+            return True
+        if re.search(r"\b\d{1,2}\s?(am|pm)\b", text, re.IGNORECASE):
+            return True
+        return False
         cleaned = self._strip_service_codes(cleaned, conversation, language)
         if language == "ar":
             cleaned = re.sub(r"\(\s*[A-Za-z0-9 _-]+\s*\)", "", cleaned)
@@ -1404,6 +1494,65 @@ class DialogOrchestrator:
         session_state.save(update_fields=["context", "updated_at"])
         return count
 
+    def _apply_extracted_slots(
+        self,
+        *,
+        slots: dict,
+        extracted: dict,
+        services: list,
+        clinic_tz: str,
+        language: str,
+        threshold: float,
+    ) -> None:
+        extracted_slots = extracted.get("slots") if isinstance(extracted, dict) else {}
+        confidence = extracted.get("confidence") if isinstance(extracted, dict) else {}
+
+        def _conf(key: str) -> float:
+            try:
+                return float((confidence or {}).get(key, 0))
+            except (TypeError, ValueError):
+                return 0.0
+
+        reason = str((extracted_slots or {}).get("reason") or "").strip().lower()
+        if reason and not slots.get("reason") and _conf("reason") >= threshold:
+            if reason not in {"referral", "cosmetic", "pain", "checkup", "other"}:
+                reason = self._detect_booking_reason(reason, language) or ""
+            if reason:
+                slots["reason"] = reason
+
+        service_code = str((extracted_slots or {}).get("service_code") or "").strip()
+        service_text = str((extracted_slots or {}).get("service_text") or "").strip()
+        if not slots.get("service_code") and _conf("service") >= threshold:
+            if service_code:
+                match = next((svc for svc in services if svc.code == service_code), None)
+                if match:
+                    slots["service_code"] = match.code
+            if not slots.get("service_code") and service_text:
+                matched = self._match_service(service_text, services)
+                if matched:
+                    slots["service_code"] = matched
+
+        date_iso = str((extracted_slots or {}).get("date_iso") or "").strip()
+        date_text = str((extracted_slots or {}).get("date_text") or "").strip()
+        if not slots.get("date") and _conf("date") >= threshold:
+            parsed = None
+            if date_iso:
+                try:
+                    parsed = date.fromisoformat(date_iso)
+                except ValueError:
+                    parsed = None
+            if not parsed and date_text:
+                parsed = self._extract_date_from_text(date_text, clinic_tz)
+            if parsed:
+                slots["date"] = parsed.isoformat()
+
+        time_window = str((extracted_slots or {}).get("time_window") or "").strip().lower()
+        if not slots.get("time_window") and _conf("time_window") >= threshold:
+            if time_window not in {"morning", "afternoon", "evening", "any"}:
+                time_window = self._detect_time_window(time_window) or ""
+            if time_window:
+                slots["time_window"] = time_window
+
     def _detect_booking_reason(self, text: str, language: str) -> str | None:
         lowered = text.lower()
         reason_map = {
@@ -1465,10 +1614,10 @@ class DialogOrchestrator:
         names = ", ".join([svc.name for svc in services[:4] if svc.name])
         if language == "ar":
             if names and any(ch.isascii() and ch.isalpha() for ch in names):
-                return "?? ?????? ?????????"
+                return "يرجى اختيار خدمة"
             if names:
-                return f"?? ?????? ????????? (????: {names})"
-            return "?? ?????? ?????????"
+                return f"أي خدمة تريد؟ (مثال: {names})"
+            return "أي خدمة تريد؟"
         if names:
             return f"Which service would you like? (e.g., {names})"
         return "Which service would you like?"
@@ -1953,6 +2102,44 @@ class DialogOrchestrator:
         }
         return any(cue in normalized for cue in cues)
 
+    def _requests_handoff(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        cues = {
+            "human",
+            "agent",
+            "support",
+            "representative",
+            "staff",
+            "person",
+            "customer service",
+            "\u0645\u0648\u0638\u0641",
+            "\u0628\u0634\u0631",
+            "\u062d\u0648\u0644\u0646\u064a",
+            "\u062e\u062f\u0645\u0629 \u0627\u0644\u0639\u0645\u0644\u0627\u0621",
+            "\u0627\u0631\u064a\u062f \u0645\u0648\u0638\u0641",
+            "\u0627\u0631\u064a\u062f \u0628\u0634\u0631",
+        }
+        return any(cue in normalized for cue in cues)
+
+    def _is_emergency(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        cues = {
+            "bleeding",
+            "can't breathe",
+            "cannot breathe",
+            "difficulty breathing",
+            "severe pain",
+            "unconscious",
+            "\u0646\u0632\u064a\u0641",
+            "\u0635\u0639\u0648\u0628\u0629 \u062a\u0646\u0641\u0633",
+            "\u0623\u0644\u0645 \u0634\u062f\u064a\u062f",
+            "\u062a\u0648\u0631\u0645 \u0634\u062f\u064a\u062f",
+            "\u0625\u063a\u0645\u0627\u0621",
+        }
+        return any(cue in normalized for cue in cues)
+
     def _wants_bot_resume(self, normalized: str) -> bool:
         if not normalized:
             return False
@@ -2137,7 +2324,7 @@ class DialogOrchestrator:
         )
         if tool_name == "cancel_appointment":
             if language == "ar":
-                return f"?? ???? ????? ????? ?????? {time_label} ????? {service_label}? ??? ??? ??????? ?? ?? ???????."
+                return f"هل تريد إلغاء موعدك في {time_label} لخدمة {service_label}؟ أجب بنعم للتأكيد أو لا للاحتفاظ به."
             return f"Cancel your appointment on {time_label} for {service_label}? Reply YES to confirm or NO to keep it."
 
         new_label = ""
@@ -2153,8 +2340,8 @@ class DialogOrchestrator:
                 new_label = ""
         if language == "ar":
             if new_label:
-                return f"?? ???? ????? ????? ?? {time_label} ??? {new_label}? ??? ??? ??????? ?? ?? ???????."
-            return f"?? ???? ????? ????? ?????? {time_label}? ??? ??? ??????? ?? ?? ???????."
+                return f"هل تريد تغيير موعدك من {time_label} إلى {new_label}؟ أجب بنعم للتأكيد أو لا للاحتفاظ به."
+            return f"هل تريد تغيير موعدك في {time_label}؟ أجب بنعم للتأكيد أو لا للاحتفاظ به."
         if new_label:
             return f"Reschedule your appointment from {time_label} to {new_label}? Reply YES to confirm or NO to keep it."
         return f"Reschedule your appointment on {time_label}? Reply YES to confirm or NO to keep it."
@@ -2197,7 +2384,7 @@ class DialogOrchestrator:
 
     def _format_service_label(self, service, clinic: Clinic | None, language: str) -> str:
         if not service:
-            return "??????" if language == "ar" else "service"
+            return "خدمة" if language == "ar" else "service"
         if language == "ar" and clinic:
             if getattr(service, "language", None) != "ar":
                 translated = clinic.services.filter(code=service.code, language="ar").first()
@@ -2205,8 +2392,8 @@ class DialogOrchestrator:
                     return translated.name
         label = service.name or ""
         if language == "ar" and any(ch.isascii() and ch.isalpha() for ch in label):
-            return "??????"
-        return label or ("??????" if language == "ar" else "service")
+            return "خدمة"
+        return label or ("خدمة" if language == "ar" else "service")
 
     def _format_appointment_label(self, appointment, clinic_tz: str, language: str) -> tuple[str, str]:
         tz = ZoneInfo(clinic_tz or "UTC")
@@ -2242,8 +2429,8 @@ class DialogOrchestrator:
                 lines.append(f"{idx}) {start_label} ? {service_label}")
 
         if language == "ar":
-            intro = "???? ???? ?? ???? ????. ???? ??? ??????:"
-            outro = "???? ????? ?????? ??? (????: 1 ?? 2)."
+            intro = "لديك عدة مواعيد قادمة. يرجى اختيار واحدة:"
+            outro = "أجب برقم واحد فقط (مثال: 1 أو 2)."
         else:
             intro = "You have multiple upcoming appointments. Please choose one:"
             outro = "Reply with a single number (e.g., 1 or 2)."
@@ -2300,12 +2487,12 @@ class DialogOrchestrator:
         tokens = {"yes", "y", "ok", "okay", "confirm", "sure", "agree"}
         if any(token in normalized for token in tokens):
             return True
-        arabic_tokens = {"???", "????", "????", "?????", "????", "?????", "????", "??"}
+        arabic_tokens = {"نعم", "ايوا", "موافق", "تمام", "اوكي", "بالتأكيد", "ياريت", "حسناً"}
         return any(token in raw for token in arabic_tokens)
 
     def _is_negative_reply(self, normalized: str, raw: str) -> bool:
         tokens = {"no", "nah", "nope", "cancel", "stop", "don't"}
         if any(token in normalized for token in tokens):
             return True
-        arabic_tokens = {"??", "??", "??", "??? ?????", "?? ????", "??????", "???", "?????", "?????"}
+        arabic_tokens = {"لا", "لأ", "كلا", "ألغِ", "توقف", "متأكدش", "أبو", "أرفض", "مو موافق"}
         return any(token in raw for token in arabic_tokens)
