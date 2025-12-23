@@ -261,7 +261,7 @@ class DialogOrchestrator:
             except LLMRouterError as exc:
                 logger.warning("LLM general inquiry skipped: %s", exc)
                 response_text = (
-                    "يرجى مشاركة اسمك قبل إتمام الحجز."
+                    "أكيد، تفضل سؤالك وسأحاول مساعدتك."
                     if language == "ar"
                     else "Sure. What would you like to know? I can help with bookings and clinic info."
                 )
