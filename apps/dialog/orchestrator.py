@@ -164,6 +164,30 @@ class DialogOrchestrator:
                     logger.warning("Failed to create handoff notification: %s", err)
                 return None, "handoff"
 
+        if self._requests_handoff(normalized) or self._is_emergency(normalized):
+            if not conversation.handoff_required:
+                conversation.handoff_required = True
+                conversation.save(update_fields=["handoff_required", "updated_at"])
+                session_state.context["handoff_reason"] = "emergency" if self._is_emergency(normalized) else "user_request"
+                session_state.save(update_fields=["context", "updated_at"])
+                try:
+                    from apps.accounts.notifications import notify_handoff
+
+                    notify_handoff(conversation)
+                except Exception as err:  # pragma: no cover - best effort logging
+                    logger.warning("Failed to create handoff notification: %s", err)
+            response_text = AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+            response_text = self._send_outbound_message(
+                conversation=conversation,
+                language=language,
+                body=response_text,
+                intent="handoff",
+                metadata={"auto_reply": True, "reason": session_state.context.get("handoff_reason") or "handoff"},
+                idempotency_key=f"handoff:{conversation.id}:{inbound_message.id}",
+                queue_session=queue_session,
+            )
+            return response_text, "handoff"
+
         if conversation.handoff_required:
             if resume_bot:
                 conversation.handoff_required = False
