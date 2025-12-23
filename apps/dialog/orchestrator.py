@@ -856,7 +856,8 @@ class DialogOrchestrator:
 
         if not valid:
             fail_count = self._record_validator_failure(session_state, fail_reason or "invalid_reply")
-            if fail_count >= 3 and not conversation.handoff_required:
+            max_fails = int(getattr(settings, "VALIDATOR_MAX_FAILS", 3))
+            if fail_count >= max_fails and not conversation.handoff_required:
                 conversation.handoff_required = True
                 conversation.save(update_fields=["handoff_required", "updated_at"])
                 if session_state:
@@ -924,12 +925,12 @@ class DialogOrchestrator:
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
         cleaned = re.sub(r"\(\s*\)", "", cleaned).strip()
         cleaned = re.sub(r"\s+([,.:;!?])", r"\1", cleaned)
-        cleaned = re.sub(r"\s+(\u061f)", r"\1", cleaned)
+        cleaned = re.sub(r"\s+(؟)", r"\1", cleaned)
         return cleaned
 
     def _safe_clarify_prompt(self, language: str) -> str:
         if language == "ar":
-            return "\u0645\u0646 \u0641\u0636\u0644\u0643 \u0648\u0636\u0651\u062d \u0637\u0644\u0628\u0643 \u0628\u0643\u0644\u0645\u0629 \u0648\u0627\u062d\u062f\u0629."
+            return "من فضلك وضح طلبك بكلمة واحدة."
         return "Could you clarify your request in one sentence?"
 
     def _validate_reply(
@@ -1010,7 +1011,7 @@ class DialogOrchestrator:
         return False
 
     def _count_questions(self, text: str) -> int:
-        return text.count("?") + text.count("\u061f")
+        return text.count("?") + text.count("؟")
 
     def _contains_english(self, text: str) -> bool:
         return bool(re.search(r"[A-Za-z]{3,}", text or ""))
@@ -1180,6 +1181,9 @@ class DialogOrchestrator:
             missing.append("date")
         if not slots.get("time_window"):
             missing.append("time_window")
+
+        resolved_slots = {"reason", "pain_level", "service", "date", "time_window"} - set(missing)
+        self._clear_slot_prompt_counts(session_state, resolved_slots)
 
         prompt = ""
         actions: list[str] = []
@@ -1558,6 +1562,36 @@ class DialogOrchestrator:
         session_state.save(update_fields=["context", "updated_at"])
         return count
 
+
+    def _increment_slot_prompt_count(self, session_state: SessionState, state: str) -> int:
+        counts = session_state.context.get("slot_prompt_counts")
+        if not isinstance(counts, dict):
+            counts = {}
+        counts[state] = int(counts.get(state, 0)) + 1
+        session_state.context["slot_prompt_counts"] = counts
+        session_state.save(update_fields=["context", "updated_at"])
+        return counts[state]
+
+    def _clear_slot_prompt_counts(self, session_state: SessionState, resolved_slots: set[str]) -> None:
+        counts = session_state.context.get("slot_prompt_counts")
+        if not isinstance(counts, dict) or not counts:
+            return
+        state_map = {
+            "ASK_REASON": "reason",
+            "ASK_PAIN_LEVEL": "pain_level",
+            "ASK_SERVICE": "service",
+            "ASK_DATE": "date",
+            "ASK_TIME_WINDOW": "time_window",
+        }
+        changed = False
+        for state_key, slot_key in state_map.items():
+            if slot_key in resolved_slots and state_key in counts:
+                counts.pop(state_key, None)
+                changed = True
+        if changed:
+            session_state.context["slot_prompt_counts"] = counts
+            session_state.save(update_fields=["context", "updated_at"])
+
     def _apply_extracted_slots(
         self,
         *,
@@ -1703,6 +1737,19 @@ class DialogOrchestrator:
             return "ما سبب الزيارة؟ (تحويل/تجميلي/ألم/فحص/أخرى)"
         return "What is the visit reason? (referral/cosmetic/pain/checkup/other)"
 
+    
+    def _format_reason_numeric_prompt(self, language: str) -> str:
+        if language == "ar":
+            return (
+                "اختر رقم سبب الزيارة: "
+                "1 تحويل، 2 تجميلي، 3 ألم، "
+                "4 فحص، 5 أخرى. أرسل رقم فقط."
+            )
+        return (
+            "Choose the visit reason number: 1 referral, 2 cosmetic, 3 pain, 4 checkup, 5 other. "
+            "Reply with a number only."
+        )
+
     def _format_service_prompt(self, language: str, services: list) -> str:
         names = ", ".join([svc.name for svc in services[:4] if svc.name])
         if language == "ar":
@@ -1760,6 +1807,9 @@ class DialogOrchestrator:
         services: list,
     ) -> str:
         if state == "ASK_REASON":
+            attempt = self._increment_slot_prompt_count(session_state, state)
+            if attempt >= 2:
+                return self._format_reason_numeric_prompt(language)
             prompt = self._format_reason_prompt(language)
             return self._select_question_variant(
                 session_state=session_state,
@@ -2224,12 +2274,12 @@ class DialogOrchestrator:
             "staff",
             "person",
             "customer service",
-            "\u0645\u0648\u0638\u0641",
-            "\u0628\u0634\u0631",
-            "\u062d\u0648\u0644\u0646\u064a",
-            "\u062e\u062f\u0645\u0629 \u0627\u0644\u0639\u0645\u0644\u0627\u0621",
-            "\u0627\u0631\u064a\u062f \u0645\u0648\u0638\u0641",
-            "\u0627\u0631\u064a\u062f \u0628\u0634\u0631",
+            "موظف",
+            "بشر",
+            "حولني",
+            "خدمة العملاء",
+            "اريد موظف",
+            "اريد بشر",
         }
         return any(cue in normalized for cue in cues)
 
@@ -2243,11 +2293,11 @@ class DialogOrchestrator:
             "difficulty breathing",
             "severe pain",
             "unconscious",
-            "\u0646\u0632\u064a\u0641",
-            "\u0635\u0639\u0648\u0628\u0629 \u062a\u0646\u0641\u0633",
-            "\u0623\u0644\u0645 \u0634\u062f\u064a\u062f",
-            "\u062a\u0648\u0631\u0645 \u0634\u062f\u064a\u062f",
-            "\u0625\u063a\u0645\u0627\u0621",
+            "نزيف",
+            "صعوبة تنفس",
+            "ألم شديد",
+            "تورم شديد",
+            "إغماء",
         }
         return any(cue in normalized for cue in cues)
 
