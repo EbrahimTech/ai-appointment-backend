@@ -911,6 +911,32 @@ class DialogOrchestrator:
             self._clear_booking_flow(session_state)
             return "لا توجد خدمات متاحة حالياً." if language == "ar" else "No services are available right now."
 
+        if getattr(settings, "LLM_SLOT_EXTRACTOR_ENABLED", False):
+            needs_extraction = any(
+                not slots.get(key) for key in ("reason", "service_code", "date", "time_window")
+            )
+            if needs_extraction:
+                try:
+                    extracted = self.llm_router.extract_booking_slots(
+                        clinic=clinic,
+                        language=language,
+                        prompt=body,
+                        conversation_id=conversation.id,
+                    )
+                    if extracted:
+                        self._apply_extracted_slots(
+                            slots=slots,
+                            extracted=extracted,
+                            services=services,
+                            clinic_tz=clinic.tz,
+                            language=language,
+                            threshold=float(getattr(settings, "LLM_SLOT_EXTRACTOR_CONFIDENCE", 0.75)),
+                        )
+                except LLMRouterError as exc:
+                    logger.warning("LLM slot extractor skipped: %s", exc)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error("LLM slot extractor error: %s", exc, exc_info=True)
+
         if not slots.get("reason"):
             reason = self._detect_booking_reason(body, language)
             if reason:
