@@ -184,7 +184,6 @@ class DialogOrchestrator:
                 intent="handoff",
                 metadata={"auto_reply": True, "reason": session_state.context.get("handoff_reason") or "handoff"},
                 idempotency_key=f"handoff:{conversation.id}:{inbound_message.id}",
-                queue_session=queue_session,
             )
             return response_text, "handoff"
 
@@ -913,6 +912,7 @@ class DialogOrchestrator:
         session_state: SessionState | None,
         text: str,
         language: str,
+        intent: str | None = None,
     ) -> tuple[bool, str | None]:
         if not text or not text.strip():
             return False, "empty"
@@ -921,7 +921,8 @@ class DialogOrchestrator:
         if language == "ar" and self._contains_english(text):
             return False, "english_in_ar"
         if self._mentions_time(text) and not self._has_slot_context(session_state):
-            return False, "slot_without_db"
+            if intent not in {"confirm", "cancel", "reschedule", "book"}:
+                return False, "slot_without_db"
         return True, None
 
     def _repair_reply_once(
