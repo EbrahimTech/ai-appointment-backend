@@ -20,7 +20,7 @@ class TopicCorridorDecision:
 
 
 class TopicCorridor:
-    """Applies soft nudges and escalations for off-topic interactions."""
+    """Applies soft nudges for off-topic interactions."""
 
     def __init__(self, polite_window: timedelta | None = None) -> None:
         self.polite_window = polite_window or timedelta(minutes=10)
@@ -41,10 +41,9 @@ class TopicCorridor:
             session_state.save(update_fields=["context", "last_nudged_at", "updated_at"])
 
             if violation_count == 1:
-                return TopicCorridorDecision(allow=False, nudge_required=True)
+                return TopicCorridorDecision(allow=True, nudge_required=True)
 
-            if violation_count > 1:
-                return TopicCorridorDecision(allow=False, handoff_required=True)
+            return TopicCorridorDecision()
 
         # decay violations over time
         if session_state.last_nudged_at and now - session_state.last_nudged_at > self.polite_window:
