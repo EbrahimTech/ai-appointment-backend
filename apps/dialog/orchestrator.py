@@ -70,7 +70,7 @@ class DialogOrchestrator:
             general_inquiry = False
             preface = "Sure, go ahead with your question. To continue the booking:"
             if language == "ar":
-                preface = "\u0623\u0643\u064a\u062f\u060c \u062a\u0641\u0636\u0644 \u0633\u0624\u0627\u0644\u0643. \u0648\u0644\u0646\u0643\u0645\u0644 \u0627\u0644\u062d\u062c\u0632:"
+                preface = "أكيد، تفضل سؤالك. ولنكمل الحجز:"
             session_state.context["booking_preface"] = preface
             session_state.save(update_fields=["context", "updated_at"])
         # LLM intent fallback (structured) to better understand Arabic/free-form requests
@@ -115,7 +115,25 @@ class DialogOrchestrator:
             metadata={"received_at": timezone.now().isoformat()},
         )
         self._set_llm_trace_inbound(session_state, inbound_message.id)
+        if not general_inquiry:
+            self._reset_flow_turn(session_state, "general")
         if general_inquiry:
+            general_turns = self._increment_flow_turn(session_state, "general")
+            general_limit = int(getattr(settings, "GENERAL_MAX_TURNS", 10))
+            if general_turns >= general_limit:
+                session_state.context["clarify_menu_stage"] = "main"
+                session_state.save(update_fields=["context", "updated_at"])
+                response_text = self._clarify_menu_prompt(language, "main")
+                response_text = self._send_outbound_message(
+                    conversation=conversation,
+                    language=language,
+                    body=response_text,
+                    intent="clarify",
+                    metadata={"auto_reply": True, "reason": "general_turns"},
+                    idempotency_key=f"general-menu:{conversation.id}:{inbound_message.id}",
+                    queue_session=queue_session,
+                )
+                return response_text, "clarify"
             self._clear_booking_flow(session_state)
             self._clear_action_flow(session_state)
             session_state.context.pop("slot_suggestions", None)
@@ -357,6 +375,62 @@ class DialogOrchestrator:
                 intent = "confirm"
 
         booking_flow = session_state.context.get("booking_flow") or {}
+
+        booking_active = bool(booking_flow) and booking_flow.get("state") not in {"BOOKED", "DONE"}
+        if (
+            intent == "clarify"
+            and booking_active
+            and booking_flow.get("state") == "ASK_REASON"
+            and not explicit_booking
+            and not self._asks_for_slots(body)
+        ):
+            self._clear_booking_flow(session_state)
+            booking_flow = {}
+            booking_active = False
+
+        if intent == "clarify" and not booking_active:
+            response_text, override_intent, forced_query = self._handle_clarify_flow(
+                conversation=conversation,
+                session_state=session_state,
+                body=body,
+                language=language,
+            )
+            if forced_query:
+                try:
+                    response_text = self.llm_router.answer(
+                        clinic=conversation.clinic,
+                        language=language,
+                        prompt=forced_query,
+                        conversation_id=conversation.id,
+                    )
+                except LLMRouterError as exc:
+                    logger.warning("LLM clarify menu answer skipped: %s", exc)
+                    response_text = self._safe_clarify_prompt(language)
+                response_text = self._send_outbound_message(
+                    conversation=conversation,
+                    language=language,
+                    body=response_text,
+                    intent="clarify",
+                    metadata={"auto_reply": True, "reason": "clarify_menu"},
+                    idempotency_key=f"clarify-menu:{conversation.id}:{inbound_message.id}",
+                    queue_session=queue_session,
+                )
+                return response_text, "clarify"
+            if response_text:
+                response_text = self._send_outbound_message(
+                    conversation=conversation,
+                    language=language,
+                    body=response_text,
+                    intent="clarify",
+                    metadata={"auto_reply": True, "reason": "clarify_menu"},
+                    idempotency_key=f"clarify-menu:{conversation.id}:{inbound_message.id}",
+                    queue_session=queue_session,
+                )
+                return response_text, "clarify"
+            if override_intent:
+                intent = override_intent
+                if override_intent == "book":
+                    explicit_booking = True
         should_handle_booking_flow = False
         if not general_inquiry:
             if intent == "book" and (explicit_booking or booking_flow):
@@ -932,6 +1006,159 @@ class DialogOrchestrator:
         if language == "ar":
             return "من فضلك وضح طلبك بكلمة واحدة."
         return "Could you clarify your request in one sentence?"
+    def _increment_flow_turn(self, session_state: SessionState, key: str) -> int:
+        turns = session_state.context.get("flow_turns")
+        if not isinstance(turns, dict):
+            turns = {}
+        turns[key] = int(turns.get(key, 0)) + 1
+        session_state.context["flow_turns"] = turns
+        session_state.save(update_fields=["context", "updated_at"])
+        return turns[key]
+
+    def _reset_flow_turn(self, session_state: SessionState, key: str) -> None:
+        turns = session_state.context.get("flow_turns")
+        if not isinstance(turns, dict):
+            return
+        if key in turns:
+            turns.pop(key, None)
+            session_state.context["flow_turns"] = turns
+            session_state.save(update_fields=["context", "updated_at"])
+
+    def _parse_menu_choice(self, text: str) -> int | None:
+        if not text:
+            return None
+        cleaned = text.strip()
+        digit_map = {
+            "٠": "0",
+            "١": "1",
+            "٢": "2",
+            "٣": "3",
+            "٤": "4",
+            "٥": "5",
+            "٦": "6",
+            "٧": "7",
+            "٨": "8",
+            "٩": "9",
+        }
+        for ar_digit, en_digit in digit_map.items():
+            cleaned = cleaned.replace(ar_digit, en_digit)
+        match = re.search(r"\b([1-4])\b", cleaned)
+        if not match:
+            return None
+        return int(match.group(1))
+
+    def _clarify_menu_prompt(self, language: str, stage: str) -> str:
+        if stage == "action":
+            return (
+                "اختر رقم:\n1 تعديل موعد\n2 إلغاء موعد\n(اكتب رقم فقط)"
+                if language == "ar"
+                else "Choose a number:\n1 Reschedule appointment\n2 Cancel appointment\n(Reply with a number only)"
+            )
+        if stage == "info":
+            return (
+                "اختر رقم:\n1 أسعار\n2 خدمات\n3 أشعة\n(اكتب رقم فقط)"
+                if language == "ar"
+                else "Choose a number:\n1 Prices\n2 Services\n3 X-ray\n(Reply with a number only)"
+            )
+        if stage == "hours":
+            return (
+                "اختر رقم:\n1 الموقع\n2 ساعات العمل\n(اكتب رقم فقط)"
+                if language == "ar"
+                else "Choose a number:\n1 Location\n2 Working hours\n(Reply with a number only)"
+            )
+        return (
+            "عشان أساعدك بسرعة، اختر رقم:\n1 حجز موعد\n2 تعديل/إلغاء موعد\n3 أسعار/خدمات/أشعة\n4 موقع/ساعات العمل\n(اكتب رقم فقط)"
+            if language == "ar"
+            else ("To help you quickly, choose a number:\n1 Book appointment\n2 Reschedule/Cancel\n3 Prices/Services/X-ray\n4 Location/Hours\n(Reply with a number only)")
+        )
+
+    def _clarify_retry_prompt(self, language: str) -> str:
+        if language == "ar":
+            return "رجاء اكتب رقم فقط."
+        return "Please reply with a number only."
+
+    def _handle_clarify_flow(
+        self,
+        *,
+        conversation: Conversation,
+        session_state: SessionState,
+        body: str,
+        language: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        stage = session_state.context.get("clarify_menu_stage")
+        choice = self._parse_menu_choice(body)
+        menu_after = int(getattr(settings, "CLARIFY_MENU_AFTER", 3))
+        invalid_limit = int(getattr(settings, "CLARIFY_MENU_INVALID_MAX", 5))
+        if stage:
+            if not choice:
+                count = self._increment_flow_turn(session_state, f"clarify_{stage}")
+                if count >= invalid_limit:
+                    return self._clarify_retry_prompt(language), None, None
+                return self._clarify_menu_prompt(language, stage), None, None
+
+            if stage == "main":
+                self._reset_flow_turn(session_state, "clarify")
+                self._reset_flow_turn(session_state, f"clarify_{stage}")
+                if choice == 1:
+                    session_state.context.pop("clarify_menu_stage", None)
+                    session_state.save(update_fields=["context", "updated_at"])
+                    return None, "book", None
+                if choice == 2:
+                    session_state.context["clarify_menu_stage"] = "action"
+                    session_state.save(update_fields=["context", "updated_at"])
+                    return self._clarify_menu_prompt(language, "action"), None, None
+                if choice == 3:
+                    session_state.context["clarify_menu_stage"] = "info"
+                    session_state.save(update_fields=["context", "updated_at"])
+                    return self._clarify_menu_prompt(language, "info"), None, None
+                if choice == 4:
+                    session_state.context["clarify_menu_stage"] = "hours"
+                    session_state.save(update_fields=["context", "updated_at"])
+                    return self._clarify_menu_prompt(language, "hours"), None, None
+                return self._clarify_menu_prompt(language, "main"), None, None
+
+            if stage == "action":
+                self._reset_flow_turn(session_state, "clarify")
+                self._reset_flow_turn(session_state, f"clarify_{stage}")
+                session_state.context.pop("clarify_menu_stage", None)
+                session_state.save(update_fields=["context", "updated_at"])
+                if choice == 1:
+                    return None, "reschedule", None
+                if choice == 2:
+                    return None, "cancel", None
+                return self._clarify_menu_prompt(language, "action"), None, None
+
+            if stage == "info":
+                self._reset_flow_turn(session_state, "clarify")
+                self._reset_flow_turn(session_state, f"clarify_{stage}")
+                session_state.context.pop("clarify_menu_stage", None)
+                session_state.save(update_fields=["context", "updated_at"])
+                if choice == 1:
+                    return None, None, ("ما هي الأسعار؟" if language == "ar" else "What are the prices?")
+                if choice == 2:
+                    return None, None, ("ما هي الخدمات المتاحة؟" if language == "ar" else "What services are available?")
+                if choice == 3:
+                    return None, None, ("هل يوجد أشعة؟" if language == "ar" else "Do you offer X-ray services?")
+                return self._clarify_menu_prompt(language, "info"), None, None
+
+            if stage == "hours":
+                self._reset_flow_turn(session_state, "clarify")
+                self._reset_flow_turn(session_state, f"clarify_{stage}")
+                session_state.context.pop("clarify_menu_stage", None)
+                session_state.save(update_fields=["context", "updated_at"])
+                if choice == 1:
+                    return None, None, ("ما هو موقع العيادة؟" if language == "ar" else "What is the clinic location?")
+                if choice == 2:
+                    return None, None, ("ما هي ساعات العمل؟" if language == "ar" else "What are your working hours?")
+                return self._clarify_menu_prompt(language, "hours"), None, None
+
+        count = self._increment_flow_turn(session_state, "clarify")
+        if count >= menu_after:
+            session_state.context["clarify_menu_stage"] = "main"
+            session_state.save(update_fields=["context", "updated_at"])
+            return self._clarify_menu_prompt(language, "main"), None, None
+        return self._safe_clarify_prompt(language), None, None
+
 
     def _validate_reply(
         self,
