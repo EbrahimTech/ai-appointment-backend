@@ -201,6 +201,10 @@ class DialogOrchestrator:
                 except Exception as err:  # pragma: no cover - best effort logging
                     logger.warning("Failed to create handoff notification: %s", err)
             response_text = AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+            if response_text:
+                response_text = response_text.strip()
+            if response_text and self._count_questions(response_text) == 0:
+                response_text = f"{response_text} {self._general_followup_prompt(language)}".strip()
             response_text = self._send_outbound_message(
                 conversation=conversation,
                 language=language,
@@ -431,6 +435,10 @@ class DialogOrchestrator:
                 intent = override_intent
                 if override_intent == "book":
                     explicit_booking = True
+                    payload = session_state.context.pop("clarify_menu_payload", None)
+                    if payload:
+                        session_state.save(update_fields=["context", "updated_at"])
+                        body = payload
         should_handle_booking_flow = False
         if not general_inquiry:
             if intent == "book" and (explicit_booking or booking_flow):
@@ -517,7 +525,6 @@ class DialogOrchestrator:
             repeat_tracker.get("intent") not in productive_intents
             and repeat_tracker.get("count", 0) >= repeat_threshold
         ):
-            session_state.context["handoff_reason"] = "repeat"
             session_state.context["repeat_tracker"] = {"intent": repeat_intent, "count": 0, "last_seen": now.isoformat()}
             session_state.save(update_fields=["context", "updated_at"])
             response_text = self._safe_clarify_prompt(language)
@@ -712,11 +719,23 @@ class DialogOrchestrator:
                         start_local = start_local.replace(tzinfo=ZoneInfo(conversation.clinic.tz or "UTC"))
 
                     if appointment and start_local:
-                        appointment, error_code, tentative = reschedule_appointment(
-                            clinic=conversation.clinic,
-                            appointment=appointment,
-                            start_local=start_local,
-                        )
+                        db_failure_reply = None
+                        try:
+                            appointment, error_code, tentative = reschedule_appointment(
+                                clinic=conversation.clinic,
+                                appointment=appointment,
+                                start_local=start_local,
+                            )
+                            self._clear_db_failure(session_state)
+                        except Exception as exc:  # pragma: no cover - defensive
+                            logger.error("Reschedule failed: %s", exc, exc_info=True)
+                            db_failure_reply = self._handle_db_failure(
+                                conversation=conversation,
+                                session_state=session_state,
+                                language=language,
+                            )
+                            appointment = None
+                            error_code = "DB_FAILURE"
                         if appointment:
                             session_state.context.pop("slot_suggestions", None)
                             session_state.context.pop("slot_service_code", None)
@@ -747,6 +766,9 @@ class DialogOrchestrator:
                             except Exception as exc:  # pragma: no cover - defensive
                                 logger.error("LLM action reply error: %s", exc, exc_info=True)
                             queue_session = True
+                        elif db_failure_reply:
+                            response_text = db_failure_reply
+                            queue_session = True
                         else:
                             error_text = "That time is no longer available. Please choose another time."
                             if error_code == "OUT_OF_HOURS":
@@ -756,24 +778,21 @@ class DialogOrchestrator:
                                 if error_code == "OUT_OF_HOURS":
                                     error_text = "هذا الوقت خارج ساعات العمل. يرجى اختيار وقت آخر."
                             conflict_count = self._record_slot_conflict(session_state)
-                            if conflict_count >= 2 and not conversation.handoff_required:
-                                conversation.handoff_required = True
-                                conversation.save(update_fields=["handoff_required", "updated_at"])
-                                session_state.context["handoff_reason"] = "slot_conflict"
-                                session_state.save(update_fields=["context", "updated_at"])
-                                try:
-                                    from apps.accounts.notifications import notify_handoff
-
-                                    notify_handoff(conversation)
-                                except Exception as err:  # pragma: no cover - best effort logging
-                                    logger.warning("Failed to create handoff notification: %s", err)
-                                response_text = (
-                                    AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+                            handoff_threshold = int(getattr(settings, "NO_AVAILABILITY_HANDOFF_THRESHOLD", 3))
+                            if conflict_count >= handoff_threshold:
+                                response_text = self._trigger_handoff(
+                                    conversation=conversation,
+                                    session_state=session_state,
+                                    language=language,
+                                    reason="no_availability",
                                 )
                                 queue_session = True
-                                return response_text, action_intent
-                            response_text = error_text
-                            queue_session = True
+                            else:
+                                if conflict_count >= 2:
+                                    session_state.context["clarify_menu_stage"] = "main"
+                                    session_state.save(update_fields=["context", "updated_at"])
+                                response_text = error_text
+                                queue_session = True
                     else:
                         slot_prompt = session_state.context.get("slot_offer_prompt")
                         if slot_prompt:
@@ -795,13 +814,25 @@ class DialogOrchestrator:
                         start_local = start_local.replace(tzinfo=ZoneInfo(conversation.clinic.tz or "UTC"))
 
                     if service and start_local:
-                        appointment, error_code, tentative = book_appointment(
-                            clinic=conversation.clinic,
-                            patient=conversation.patient,
-                            service=service,
-                            start_local=start_local,
-                            source="assistant",
-                        )
+                        db_failure_reply = None
+                        try:
+                            appointment, error_code, tentative = book_appointment(
+                                clinic=conversation.clinic,
+                                patient=conversation.patient,
+                                service=service,
+                                start_local=start_local,
+                                source="assistant",
+                            )
+                            self._clear_db_failure(session_state)
+                        except Exception as exc:  # pragma: no cover - defensive
+                            logger.error("Booking failed: %s", exc, exc_info=True)
+                            db_failure_reply = self._handle_db_failure(
+                                conversation=conversation,
+                                session_state=session_state,
+                                language=language,
+                            )
+                            appointment = None
+                            error_code = "DB_FAILURE"
                         if appointment:
                             session_state.context.pop("slot_suggestions", None)
                             session_state.context.pop("slot_service_code", None)
@@ -832,29 +863,29 @@ class DialogOrchestrator:
                             except Exception as exc:  # pragma: no cover - defensive
                                 logger.error("LLM action reply error: %s", exc, exc_info=True)
                             queue_session = True
+                        elif db_failure_reply:
+                            response_text = db_failure_reply
+                            queue_session = True
                         else:
                             error_text = "That slot is no longer available. Please choose another time."
                             if language == "ar":
                                 error_text = "هذا الوقت لم يعد متاحًا. يرجى اختيار وقت آخر."
                             conflict_count = self._record_slot_conflict(session_state)
-                            if conflict_count >= 2 and not conversation.handoff_required:
-                                conversation.handoff_required = True
-                                conversation.save(update_fields=["handoff_required", "updated_at"])
-                                session_state.context["handoff_reason"] = "slot_conflict"
-                                session_state.save(update_fields=["context", "updated_at"])
-                                try:
-                                    from apps.accounts.notifications import notify_handoff
-                            
-                                    notify_handoff(conversation)
-                                except Exception as err:  # pragma: no cover - best effort logging
-                                    logger.warning("Failed to create handoff notification: %s", err)
-                                response_text = (
-                                    AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+                            handoff_threshold = int(getattr(settings, "NO_AVAILABILITY_HANDOFF_THRESHOLD", 3))
+                            if conflict_count >= handoff_threshold:
+                                response_text = self._trigger_handoff(
+                                    conversation=conversation,
+                                    session_state=session_state,
+                                    language=language,
+                                    reason="no_availability",
                                 )
                                 queue_session = True
-                                return response_text, action_intent
-                            response_text = error_text
-                            queue_session = True
+                            else:
+                                if conflict_count >= 2:
+                                    session_state.context["clarify_menu_stage"] = "main"
+                                    session_state.save(update_fields=["context", "updated_at"])
+                                response_text = error_text
+                                queue_session = True
                 else:
                     response_text = self._handle_terminal_intent(conversation, intent, language)
                     queue_session = True
@@ -931,21 +962,11 @@ class DialogOrchestrator:
         if not valid:
             fail_count = self._record_validator_failure(session_state, fail_reason or "invalid_reply")
             max_fails = int(getattr(settings, "VALIDATOR_MAX_FAILS", 3))
-            if fail_count >= max_fails and not conversation.handoff_required:
-                conversation.handoff_required = True
-                conversation.save(update_fields=["handoff_required", "updated_at"])
+            if fail_count >= max_fails:
                 if session_state:
-                    session_state.context["handoff_reason"] = "validator_fail"
+                    session_state.context["clarify_menu_stage"] = "main"
                     session_state.save(update_fields=["context", "updated_at"])
-                try:
-                    from apps.accounts.notifications import notify_handoff
-
-                    notify_handoff(conversation)
-                except Exception as err:  # pragma: no cover - best effort logging
-                    logger.warning("Failed to create handoff notification: %s", err)
-                clean_body = (
-                    AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
-                )
+                clean_body = self._clarify_menu_prompt(language, "main")
             else:
                 clean_body = self._safe_clarify_prompt(language)
         else:
@@ -1006,6 +1027,11 @@ class DialogOrchestrator:
         if language == "ar":
             return "من فضلك وضح طلبك بكلمة واحدة."
         return "Could you clarify your request in one sentence?"
+    def _general_followup_prompt(self, language: str) -> str:
+        if language == "ar":
+            return "هل تريد حجز موعد أم سؤالاً عن الخدمات/الأسعار؟"
+        return "Do you want to book an appointment, or ask about services/prices?"
+
     def _increment_flow_turn(self, session_state: SessionState, key: str) -> int:
         turns = session_state.context.get("flow_turns")
         if not isinstance(turns, dict):
@@ -1047,6 +1073,13 @@ class DialogOrchestrator:
             return None
         return int(match.group(1))
 
+    def _strip_menu_choice(self, text: str) -> str:
+        if not text:
+            return ""
+        cleaned = text.strip()
+        cleaned = re.sub(r"^\s*[1-4١-٤۱-۴][\s\.\-:)\]]*", "", cleaned)
+        return cleaned.strip()
+
     def _clarify_menu_prompt(self, language: str, stage: str) -> str:
         if stage == "action":
             return (
@@ -1077,6 +1110,73 @@ class DialogOrchestrator:
             return "رجاء اكتب رقم فقط."
         return "Please reply with a number only."
 
+
+
+    def _format_clinic_location(self, clinic, language: str) -> str:
+        address = (clinic.address or "").strip()
+        if address:
+            if language == "ar":
+                return f"عنوان العيادة: {address}"
+            return f"Clinic address: {address}"
+        if language == "ar":
+            return "عذراً، لا يوجد عنوان مسجل حالياً."
+        return "The clinic address is not set yet."
+
+    def _format_clinic_hours(self, clinic, language: str) -> str:
+        hours = list(clinic.service_hours.all())
+        if not hours:
+            if language == "ar":
+                return "عذراً، لم تتم تهيئة ساعات العمل بعد."
+            return "Working hours are not set yet."
+        by_weekday = {}
+        for entry in hours:
+            weekday = int(entry.weekday)
+            window = by_weekday.get(weekday)
+            if not window:
+                by_weekday[weekday] = {"start": entry.start_time, "end": entry.end_time}
+                continue
+            if entry.start_time < window["start"]:
+                window["start"] = entry.start_time
+            if entry.end_time > window["end"]:
+                window["end"] = entry.end_time
+        day_names_en = [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        ]
+        day_names_ar = [
+            "الاثنين",
+            "الثلاثاء",
+            "الأربعاء",
+            "الخميس",
+            "الجمعة",
+            "السبت",
+            "الأحد",
+        ]
+        lines = []
+        for weekday in sorted(by_weekday.keys()):
+            window = by_weekday[weekday]
+            start_label = window["start"].strftime("%H:%M")
+            end_label = window["end"].strftime("%H:%M")
+            if language == "ar":
+                label = day_names_ar[weekday]
+                lines.append(f"{label}: {start_label}-{end_label}")
+            else:
+                label = day_names_en[weekday]
+                lines.append(f"{label}: {start_label}-{end_label}")
+        tz_label = clinic.tz or "UTC"
+        if language == "ar":
+            header = "ساعات العمل:"
+            footer = f"جميع الأوقات بتوقيت {tz_label}."
+        else:
+            header = "Working hours:"
+            footer = f"All times are in {tz_label}."
+        return "\n".join([header, *lines, footer])
+
     def _handle_clarify_flow(
         self,
         *,
@@ -1100,6 +1200,9 @@ class DialogOrchestrator:
                 self._reset_flow_turn(session_state, "clarify")
                 self._reset_flow_turn(session_state, f"clarify_{stage}")
                 if choice == 1:
+                    payload = self._strip_menu_choice(body)
+                    if payload:
+                        session_state.context["clarify_menu_payload"] = payload
                     session_state.context.pop("clarify_menu_stage", None)
                     session_state.save(update_fields=["context", "updated_at"])
                     return None, "book", None
@@ -1147,9 +1250,9 @@ class DialogOrchestrator:
                 session_state.context.pop("clarify_menu_stage", None)
                 session_state.save(update_fields=["context", "updated_at"])
                 if choice == 1:
-                    return None, None, ("ما هو موقع العيادة؟" if language == "ar" else "What is the clinic location?")
+                    return self._format_clinic_location(conversation.clinic, language), None, None
                 if choice == 2:
-                    return None, None, ("ما هي ساعات العمل؟" if language == "ar" else "What are your working hours?")
+                    return self._format_clinic_hours(conversation.clinic, language), None, None
                 return self._clarify_menu_prompt(language, "hours"), None, None
 
         count = self._increment_flow_turn(session_state, "clarify")
@@ -1305,21 +1408,14 @@ class DialogOrchestrator:
         max_turns = int(getattr(settings, "BOOKING_MAX_TURNS", 8))
         if turns > max_turns:
             ctx["loop_failures"] = int(ctx.get("loop_failures", 0)) + 1
-            session_state.context["booking_flow"] = ctx
+            session_state.context["booking_loop_failures"] = ctx["loop_failures"]
+            session_state.context["clarify_menu_stage"] = "main"
+            session_state.context.pop("slot_suggestions", None)
+            session_state.context.pop("slot_offer_prompt", None)
+            session_state.context.pop("slot_service_code", None)
+            self._clear_booking_flow(session_state)
             session_state.save(update_fields=["context", "updated_at"])
-            if ctx["loop_failures"] >= 2 and not conversation.handoff_required:
-                conversation.handoff_required = True
-                conversation.save(update_fields=["handoff_required", "updated_at"])
-                session_state.context["handoff_reason"] = "max_turns"
-                session_state.save(update_fields=["context", "updated_at"])
-                try:
-                    from apps.accounts.notifications import notify_handoff
-
-                    notify_handoff(conversation)
-                except Exception as err:  # pragma: no cover - best effort logging
-                    logger.warning("Failed to create handoff notification: %s", err)
-                return AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
-            return self._safe_clarify_prompt(language)
+            return self._clarify_menu_prompt(language, "main")
 
         clinic = conversation.clinic
         services = self._get_services_for_language(clinic, language)
@@ -1468,7 +1564,16 @@ class DialogOrchestrator:
             date_value = date.fromisoformat(slots["date"])
             start_dt, end_dt = self._window_range(date_value, slots["time_window"], clinic.tz)
             actions.append("get_available_slots")
-            available = find_available_slots(clinic, service, start=start_dt, end=end_dt, limit=3)
+            try:
+                available = find_available_slots(clinic, service, start=start_dt, end=end_dt, limit=3)
+                self._clear_db_failure(session_state)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("Slot lookup failed: %s", exc, exc_info=True)
+                return self._handle_db_failure(
+                    conversation=conversation,
+                    session_state=session_state,
+                    language=language,
+                )
             if not available:
                 slots.pop("date", None)
                 slots.pop("time_window", None)
@@ -1479,18 +1584,19 @@ class DialogOrchestrator:
                     else "No availability on that day. What date works for you?"
                 )
                 conflict_count = self._record_slot_conflict(session_state)
-                if conflict_count >= 2 and not conversation.handoff_required:
-                    conversation.handoff_required = True
-                    conversation.save(update_fields=["handoff_required", "updated_at"])
-                    session_state.context["handoff_reason"] = "slot_conflict"
+                handoff_threshold = int(
+                    getattr(settings, "NO_AVAILABILITY_HANDOFF_THRESHOLD", 3)
+                )
+                if conflict_count >= handoff_threshold:
+                    return self._trigger_handoff(
+                        conversation=conversation,
+                        session_state=session_state,
+                        language=language,
+                        reason="no_availability",
+                    )
+                if conflict_count >= 2:
+                    session_state.context["clarify_menu_stage"] = "main"
                     session_state.save(update_fields=["context", "updated_at"])
-                    try:
-                        from apps.accounts.notifications import notify_handoff
-
-                        notify_handoff(conversation)
-                    except Exception as err:  # pragma: no cover - best effort logging
-                        logger.warning("Failed to create handoff notification: %s", err)
-                    return AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
             else:
                 session_state.context.pop("slot_conflict_count", None)
                 prompt = self._build_slot_prompt(available, language, clinic.tz)
@@ -1552,22 +1658,11 @@ class DialogOrchestrator:
         max_turns = int(getattr(settings, "BOOKING_MAX_TURNS", 8))
         if turns > max_turns:
             ctx["loop_failures"] = int(ctx.get("loop_failures", 0)) + 1
-            session_state.context["action_flow"] = ctx
+            session_state.context["action_loop_failures"] = ctx["loop_failures"]
+            session_state.context["clarify_menu_stage"] = "main"
+            self._clear_action_flow(session_state)
             session_state.save(update_fields=["context", "updated_at"])
-            if ctx["loop_failures"] >= 2 and not conversation.handoff_required:
-                conversation.handoff_required = True
-                conversation.save(update_fields=["handoff_required", "updated_at"])
-                session_state.context["handoff_reason"] = "max_turns"
-                session_state.save(update_fields=["context", "updated_at"])
-                try:
-                    from apps.accounts.notifications import notify_handoff
-
-                    notify_handoff(conversation)
-                except Exception as err:  # pragma: no cover - best effort logging
-                    logger.warning("Failed to create handoff notification: %s", err)
-                fallback = AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
-                return fallback, "handoff"
-            return self._safe_clarify_prompt(language), action_intent
+            return self._clarify_menu_prompt(language, "main"), "clarify"
 
         if not conversation.patient:
             self._clear_action_flow(session_state)
@@ -1788,6 +1883,57 @@ class DialogOrchestrator:
         session_state.context["slot_conflict_count"] = count
         session_state.save(update_fields=["context", "updated_at"])
         return count
+
+    def _record_db_failure(self, session_state: SessionState) -> int:
+        count = int(session_state.context.get("db_failure_count", 0)) + 1
+        session_state.context["db_failure_count"] = count
+        session_state.save(update_fields=["context", "updated_at"])
+        return count
+
+    def _clear_db_failure(self, session_state: SessionState) -> None:
+        if "db_failure_count" in session_state.context:
+            session_state.context.pop("db_failure_count", None)
+            session_state.save(update_fields=["context", "updated_at"])
+
+    def _trigger_handoff(
+        self,
+        *,
+        conversation: Conversation,
+        session_state: SessionState | None,
+        language: str,
+        reason: str,
+    ) -> str:
+        if session_state:
+            session_state.context["handoff_reason"] = reason
+            session_state.save(update_fields=["context", "updated_at"])
+        if not conversation.handoff_required:
+            conversation.handoff_required = True
+            conversation.save(update_fields=["handoff_required", "updated_at"])
+            try:
+                from apps.accounts.notifications import notify_handoff
+
+                notify_handoff(conversation)
+            except Exception as err:  # pragma: no cover - best effort logging
+                logger.warning("Failed to create handoff notification: %s", err)
+        return AR_FALLBACK_MESSAGE if language == "ar" else "I'll connect you with our support team."
+
+    def _handle_db_failure(
+        self,
+        *,
+        conversation: Conversation,
+        session_state: SessionState,
+        language: str,
+    ) -> str:
+        fail_count = self._record_db_failure(session_state)
+        max_db_failures = int(getattr(settings, "DB_FAILURE_HANDOFF_THRESHOLD", 2))
+        if fail_count >= max_db_failures:
+            return self._trigger_handoff(
+                conversation=conversation,
+                session_state=session_state,
+                language=language,
+                reason="db_failure",
+            )
+        return self._safe_clarify_prompt(language)
 
 
     def _increment_slot_prompt_count(self, session_state: SessionState, state: str) -> int:
